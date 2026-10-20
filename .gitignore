@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+
+# Data: generated, reproducible from the simulator (seed + version)
+data/raw/
+data/processed/
+!data/**/.gitkeep
+
+# Experiment tracking
+mlruns/
+mlartifacts/
+
+# Local environment
+.env
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
