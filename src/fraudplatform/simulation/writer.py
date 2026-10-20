@@ -50,6 +50,9 @@ def write_dataset(result: SimulationResult, out_root: Path) -> Path:
         "dataset_hash": dataset_hash,
         "files": files,
     }
-    (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    (out / "summary.md").write_text(build_summary(result, dataset_hash), encoding="utf-8")
+    # newline="\n": same bytes on every OS (Windows would otherwise write CRLF).
+    manifest_text = json.dumps(manifest, indent=2) + "\n"
+    (out / "manifest.json").write_text(manifest_text, encoding="utf-8", newline="\n")
+    summary_text = build_summary(result, dataset_hash)
+    (out / "summary.md").write_text(summary_text, encoding="utf-8", newline="\n")
     return out
