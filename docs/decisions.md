@@ -18,6 +18,8 @@ con una nueva entrada que la sustituya (no se reescribe la historia).
 | 011 | Data Quality: rechazar, reparar o avisar | Aceptada (Fase 3) |
 | 012 | Clientes sin país: rechazo en cascada | Aceptada (Fase 3) |
 | 013 | Simulador v1.0.1: corrección de edad mínima | Aceptada (Fase 3) |
+| 014 | Artefacto conocido: transacciones en los bordes del periodo | Aceptada (Fase 4) |
+| 015 | EDA solo sobre el periodo de entrenamiento | Aceptada (Fase 4) |
 
 ---
 
@@ -216,3 +218,35 @@ calculaba 18 años como 18 × 365,25 días en lugar de 18 años de calendario.
 **Consecuencias.** Cambia el hash del dataset (`a16b1bf8…` → `350d74bd…`). Los informes de
 ambas versiones se conservan en `reports/simulation/`. Es un buen ejemplo de por qué la
 calidad de datos se valida con reglas de negocio y no solo con los defectos esperados.
+
+---
+
+## 014 — Artefacto conocido: transacciones en los bordes del periodo
+
+**Contexto.** El generador recorta (`clip`) los timestamps al periodo simulado. Las
+transacciones legítimas cuya hora local cae fuera del periodo quedan apiladas en el primer y
+el último segundo: 39 en `2024-07-01 00:00:00` y 54 en `2026-06-30 23:59:59` (0,003%).
+
+**Decisión.** Documentarlo y no corregirlo ahora. Corregirlo exige una nueva versión del
+simulador, regenerar y volver a pasar la calidad de datos, y cambiaría números ya publicados
+en los PRs de las Fases 2 y 3 por un efecto despreciable.
+
+**Consecuencias.** Si más adelante hace falta otra versión del simulador por otro motivo, se
+corregirá a la vez (remuestrear en lugar de recortar). Las features de velocity de comercio en
+esos dos segundos pueden ver un pico artificial.
+
+---
+
+## 015 — EDA solo sobre el periodo de entrenamiento
+
+**Contexto.** El EDA decide qué features construir y cómo. Si mira datos de validación, test o
+producción, esas decisiones quedan informadas por los datos con los que luego se evalúa el
+modelo (*data snooping*): el resultado del test deja de ser una estimación honesta.
+
+**Decisión.** El análisis exploratorio usa solo `train` (2024-07-01 → 2025-06-30, definido en
+`configs/splits.yaml`). De los demás periodos solo se muestran recuentos de filas.
+
+**Alternativas.** EDA sobre todo el histórico (más datos, pero contamina la evaluación).
+
+**Consecuencias.** El drift diseñado (2026) no se ha mirado en el EDA: lo tendrá que
+descubrir el monitoring de la Fase 12, como en un despliegue real.

@@ -4,7 +4,7 @@ End-to-end fraud risk scoring system built around the problems that make fraud d
 practice: temporal leakage, delayed labels, extreme class imbalance, cost-sensitive decisions,
 calibration and drift.
 
-> **Status:** work in progress. Phase 3 of 14 (data quality + SQL).
+> **Status:** work in progress. Phase 4 of 14 (EDA + statistics).
 > No model results exist yet; this README will only report numbers produced by real runs.
 
 ## Design
@@ -21,7 +21,7 @@ Requirements: Python 3.11+, Docker.
 ```bash
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
+pip install -e ".[dev]"              # add ,analysis for notebooks
 
 fraud simulate --scale small       # writes data/raw/v<version>-small/
 docker compose up -d db            # PostgreSQL 16 on localhost:5433
@@ -41,6 +41,7 @@ Reports of the full dataset: [simulation](reports/simulation/v1.0.1-full.md), [d
 | Load raw extract | `fraud db load` | `sql/schema/` |
 | Data quality (47 rules) | `fraud dq run` | `sql/data_quality/`, `dq.rules`, `dq.violations` |
 | Analytical SQL | `psql -f` | `sql/analysis/` |
+| EDA + statistics (train period only) | `jupytext --to ipynb --execute notebooks/02_eda.py` | [`notebooks/02_eda.ipynb`](notebooks/02_eda.ipynb), [findings](reports/eda/eda_findings.md) |
 
 ## Tests
 
