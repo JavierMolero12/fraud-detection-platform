@@ -150,6 +150,43 @@ class SimulationConfig(BaseModel):
         return self.scales[name]
 
 
+class Period(BaseModel):
+    start: date
+    end: date  # exclusive
+
+    @model_validator(mode="after")
+    def _check(self) -> Period:
+        if self.end <= self.start:
+            raise ValueError("period end must be after start")
+        return self
+
+
+class Splits(BaseModel):
+    train: Period
+    validation: Period
+    test: Period
+    production: Period
+
+    @model_validator(mode="after")
+    def _contiguous(self) -> Splits:
+        periods = [self.train, self.validation, self.test, self.production]
+        for earlier, later in zip(periods, periods[1:], strict=False):
+            if earlier.end != later.start:
+                raise ValueError("splits must be contiguous and in time order")
+        return self
+
+    def items(self) -> list[tuple[str, Period]]:
+        return [
+            (name, getattr(self, name)) for name in ("train", "validation", "test", "production")
+        ]
+
+
+def load_splits(path: Path | None = None) -> Splits:
+    path = path or CONFIG_DIR / "splits.yaml"
+    with open(path, encoding="utf-8") as fh:
+        return Splits.model_validate(yaml.safe_load(fh))
+
+
 def load_simulation_config(path: Path | None = None) -> SimulationConfig:
     path = path or CONFIG_DIR / "simulation.yaml"
     with open(path, encoding="utf-8") as fh:

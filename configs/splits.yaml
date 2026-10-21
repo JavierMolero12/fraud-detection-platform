@@ -1,0 +1,17 @@
+# Temporal splits (docs/phase1_design.md, section 8). Intervals are [start, end).
+#
+# Everything that informs a modelling decision (EDA, feature design, tuning) may only look
+# at `train`. Looking at later periods while designing would leak the future into choices.
+
+train:
+  start: "2024-07-01"
+  end: "2025-07-01"
+validation:   # calibration and decision thresholds
+  start: "2025-07-01"
+  end: "2025-10-01"
+test:         # evaluated once, at the end
+  start: "2025-10-01"
+  end: "2026-01-01"
+production:   # simulated deployment: batch scoring, monitoring, drift
+  start: "2026-01-01"
+  end: "2026-07-01"
