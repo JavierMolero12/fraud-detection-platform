@@ -114,6 +114,32 @@ def univariate_auc(values, labels) -> float:
     return float(u / (n_pos * n_neg))
 
 
+def binned_auc(values, labels, bins: int = 20) -> float:
+    """AUC after replacing each value by the fraud rate of its bin; missing values get a bin.
+
+    Plain univariate AUC only rewards monotonic relationships (U-shaped local hour scores
+    0.40). Binning first captures any shape, and treating NULL as its own bin keeps the
+    information in "no history" / "no device". The bin rates are estimated on the same data,
+    so this is an optimistic screening number, not a model metric.
+    """
+    s = pd.Series(np.asarray(values, dtype=float))
+    y = pd.Series(np.asarray(labels, dtype=bool))
+    if s.nunique(dropna=True) <= bins:
+        codes = s.astype(object).where(s.notna(), "missing").astype(str)
+    else:
+        # Point masses (e.g. 98% zeros in a velocity count) get their own bin; otherwise the
+        # quantile edges collapse and the whole column ends up in a single bin.
+        counts = s.value_counts()
+        heavy = s.isin(counts[counts > len(s) / bins].index)
+        codes = pd.Series("missing", index=s.index, dtype=object)
+        codes[heavy] = "value=" + s[heavy].astype(str)
+        rest = s.notna() & ~heavy
+        if rest.any():
+            codes[rest] = pd.qcut(s[rest], q=bins, duplicates="drop").astype(str)
+    rate = y.groupby(codes).mean()
+    return univariate_auc(codes.map(rate).to_numpy(dtype=float), y.to_numpy())
+
+
 def tukey_fences(values, k: float = 1.5) -> tuple[float, float]:
     """Classic box-plot outlier fences: [Q1 - k·IQR, Q3 + k·IQR]."""
     q1, q3 = np.nanpercentile(values, [25, 75])

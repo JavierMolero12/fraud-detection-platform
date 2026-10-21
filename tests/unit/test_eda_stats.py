@@ -8,6 +8,7 @@ import pytest
 
 from fraudplatform.eda.stats import (
     benjamini_hochberg,
+    binned_auc,
     cramers_v,
     precision_from_rates,
     rate_table,
@@ -67,6 +68,32 @@ def test_univariate_auc():
     assert univariate_auc([4, 3, 2, 1], labels) == 0.0
     assert univariate_auc([1, 1, 1, 1], labels) == 0.5
     assert univariate_auc([1, np.nan, 3, 4], labels) == 1.0  # NaN ignored
+
+
+def test_binned_auc_captures_non_monotonic_effects():
+    rng = np.random.default_rng(1)
+    hour = rng.integers(0, 24, 50_000)
+    # symmetric U-shape: high risk at both ends of the scale (hours 0-2 and 21-23)
+    labels = rng.random(50_000) < np.where((hour <= 2) | (hour >= 21), 0.2, 0.01)
+    assert abs(univariate_auc(hour, labels) - 0.5) < 0.05  # plain AUC sees nothing
+    assert binned_auc(hour, labels) > 0.7
+
+
+def test_binned_auc_handles_zero_inflated_features():
+    """Regression: 98% zeros used to collapse every quantile edge into one bin (AUC 0.5)."""
+    rng = np.random.default_rng(2)
+    n = 50_000
+    active = rng.random(n) < 0.02
+    values = np.where(active, rng.exponential(100, n), 0.0)
+    labels = rng.random(n) < np.where(active, 0.3, 0.005)
+    assert univariate_auc(values, labels) > 0.6
+    assert binned_auc(values, labels) >= univariate_auc(values, labels) - 0.01
+
+
+def test_binned_auc_treats_missing_as_information():
+    values = np.array([np.nan, np.nan, 1.0, 1.0])
+    labels = np.array([True, True, False, False])
+    assert binned_auc(values, labels) == 1.0
 
 
 def test_tukey_fences():
