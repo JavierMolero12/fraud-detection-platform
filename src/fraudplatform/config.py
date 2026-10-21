@@ -187,6 +187,34 @@ def load_splits(path: Path | None = None) -> Splits:
         return Splits.model_validate(yaml.safe_load(fh))
 
 
+class FeatureConfig(BaseModel):
+    feature_set_version: str
+    micro_amount_eur: float = Field(gt=0)
+    night_hours: tuple[int, int]
+    impossible_speed_kmh: float = Field(gt=0)
+    merchant_rate_prior: float = Field(gt=0, lt=1)
+    merchant_rate_prior_strength: float = Field(gt=0)
+    warmup_days: int = Field(ge=0)
+
+    def sql_settings(self) -> dict[str, str]:
+        """Values exposed to the feature SQL via current_setting('features.<name>')."""
+        return {
+            "features.version": self.feature_set_version,
+            "features.micro_amount_eur": str(self.micro_amount_eur),
+            "features.night_start": str(self.night_hours[0]),
+            "features.night_end": str(self.night_hours[1]),
+            "features.impossible_speed_kmh": str(self.impossible_speed_kmh),
+            "features.merchant_rate_prior": str(self.merchant_rate_prior),
+            "features.merchant_rate_prior_strength": str(self.merchant_rate_prior_strength),
+        }
+
+
+def load_feature_config(path: Path | None = None) -> FeatureConfig:
+    path = path or CONFIG_DIR / "features.yaml"
+    with open(path, encoding="utf-8") as fh:
+        return FeatureConfig.model_validate(yaml.safe_load(fh))
+
+
 def load_simulation_config(path: Path | None = None) -> SimulationConfig:
     path = path or CONFIG_DIR / "simulation.yaml"
     with open(path, encoding="utf-8") as fh:
