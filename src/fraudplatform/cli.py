@@ -14,7 +14,9 @@ from fraudplatform.logs import setup_logging
 
 app = typer.Typer(no_args_is_help=True, help="Fraud detection platform pipeline.")
 db_app = typer.Typer(no_args_is_help=True, help="PostgreSQL schema and loading.")
+dq_app = typer.Typer(no_args_is_help=True, help="Data quality: rules, quarantine, raw -> core.")
 app.add_typer(db_app, name="db")
+app.add_typer(dq_app, name="dq")
 log = logging.getLogger("fraudplatform")
 
 
@@ -61,6 +63,28 @@ def db_load(dataset_dir: Annotated[Path, typer.Argument(help="Folder written by 
     with connect() as conn:
         load_dataset(conn, dataset_dir)
     log.info("load finished in %.1fs", time.perf_counter() - started)
+
+
+@dq_app.command("run")
+def dq_run(
+    report: Annotated[Path | None, typer.Option(help="Markdown report path")] = PROJECT_ROOT
+    / "reports"
+    / "data_quality"
+    / "dq_report.md",
+) -> None:
+    """Apply the data quality rules to raw, quarantine bad rows and rebuild core."""
+    from fraudplatform.db import connect
+    from fraudplatform.quality.report import build_report
+    from fraudplatform.quality.runner import run_data_quality
+
+    started = time.perf_counter()
+    with connect() as conn:
+        run_id = run_data_quality(conn)
+        log.info("data quality run %s finished in %.1fs", run_id, time.perf_counter() - started)
+        if report is not None:
+            report.parent.mkdir(parents=True, exist_ok=True)
+            report.write_text(build_report(conn, run_id), encoding="utf-8", newline="\n")
+            typer.echo(report)
 
 
 if __name__ == "__main__":

@@ -8,17 +8,10 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from fraudplatform.markdown import md_table as _md_table
 from fraudplatform.simulation.generator import SimulationResult
 from fraudplatform.simulation.legit import LEGIT
 from fraudplatform.simulation.randomness import iso_to_epoch
-
-
-def _md_table(df: pd.DataFrame) -> str:
-    cols = [str(c) for c in df.columns]
-    lines = ["| " + " | ".join(cols) + " |", "|" + "|".join("---" for _ in cols) + "|"]
-    for row in df.itertuples(index=False):
-        lines.append("| " + " | ".join(str(v) for v in row) + " |")
-    return "\n".join(lines)
 
 
 def _pct(x: float, digits: int = 3) -> str:
