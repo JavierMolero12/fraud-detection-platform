@@ -52,7 +52,10 @@ def generate_customers(n: int, cal: Calendar, cfg: SimulationConfig, rng) -> pd.
     created_before = cal.start_s - rng.uniform(0, params.max_account_age_years * YEAR, n)
     created_during = rng.uniform(cal.start_s, cal.end_s - 14 * DAY, n)
     created_s = np.where(before, created_before, created_during).astype(np.int64)
-    created_s = np.maximum(created_s, dob_s + int(18 * YEAR))  # accounts are opened by adults
+    # Accounts are opened by adults. 18 calendar years can be up to 6575 days, more than
+    # 18 * 365.25; the extra day guarantees the account opens on or after the 18th birthday
+    # (v1.0.0 had 448 customers opening a few hours early; found by CUS_UNDERAGE_ACCOUNT).
+    created_s = np.maximum(created_s, dob_s + int(18 * YEAR) + DAY)
 
     return pd.DataFrame(
         {
