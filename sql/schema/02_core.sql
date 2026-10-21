@@ -87,8 +87,12 @@ CREATE TABLE IF NOT EXISTS core.transactions (
     payment_method TEXT          NOT NULL
         CHECK (payment_method IN ('chip_pin', 'contactless', 'ecommerce', 'mobile_wallet')),
     FOREIGN KEY (card_id, customer_id) REFERENCES core.cards (card_id, customer_id),
-    -- Online and wallet payments always come from a device; card-present ones never do.
-    CHECK ((device_id IS NULL) = (payment_method IN ('chip_pin', 'contactless')))
+    -- Card-present payments never have a customer device. Online and wallet payments always
+    -- come from one, but the source sometimes sends a placeholder ("unknown"): the data
+    -- quality stage keeps those transactions with device_id = NULL (device unknown) rather
+    -- than dropping real payments.
+    CONSTRAINT ck_txn_no_device_when_card_present
+        CHECK (device_id IS NULL OR payment_method NOT IN ('chip_pin', 'contactless'))
 );
 
 -- One row per labelled transaction. A transaction without a row is "not known to be fraud",
