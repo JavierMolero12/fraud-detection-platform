@@ -15,8 +15,10 @@ from fraudplatform.logs import setup_logging
 app = typer.Typer(no_args_is_help=True, help="Fraud detection platform pipeline.")
 db_app = typer.Typer(no_args_is_help=True, help="PostgreSQL schema and loading.")
 dq_app = typer.Typer(no_args_is_help=True, help="Data quality: rules, quarantine, raw -> core.")
+features_app = typer.Typer(no_args_is_help=True, help="Point-in-time feature engineering.")
 app.add_typer(db_app, name="db")
 app.add_typer(dq_app, name="dq")
+app.add_typer(features_app, name="features")
 log = logging.getLogger("fraudplatform")
 
 
@@ -85,6 +87,32 @@ def dq_run(
             report.parent.mkdir(parents=True, exist_ok=True)
             report.write_text(build_report(conn, run_id), encoding="utf-8", newline="\n")
             typer.echo(report)
+
+
+@features_app.command("build")
+def features_build(
+    config: Annotated[Path | None, typer.Option(help="Feature YAML")] = None,
+) -> None:
+    """Rebuild features.transaction_features (and the leaky variant) from core."""
+    from fraudplatform.config import load_feature_config
+    from fraudplatform.db import connect
+    from fraudplatform.features.builder import build_features
+
+    with connect() as conn:
+        build_features(conn, load_feature_config(config))
+
+
+@features_app.command("catalog")
+def features_catalog(
+    out: Annotated[Path, typer.Option(help="Markdown output")] = PROJECT_ROOT
+    / "docs"
+    / "feature_catalog.md",
+) -> None:
+    """Render the feature catalog to Markdown."""
+    from fraudplatform.features.catalog import render_markdown
+
+    out.write_text(render_markdown(), encoding="utf-8", newline="\n")
+    typer.echo(out)
 
 
 if __name__ == "__main__":
