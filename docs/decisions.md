@@ -20,6 +20,8 @@ con una nueva entrada que la sustituya (no se reescribe la historia).
 | 013 | Simulador v1.0.1: corrección de edad mínima | Aceptada (Fase 3) |
 | 014 | Artefacto conocido: transacciones en los bordes del periodo | Aceptada (Fase 4) |
 | 015 | EDA solo sobre el periodo de entrenamiento | Aceptada (Fase 4) |
+| 016 | Warm-up de 90 días excluido del entrenamiento | Aceptada (Fase 5) |
+| 017 | Features offline con window functions, online con lookups + test de paridad | Aceptada (Fase 5) |
 
 ---
 
@@ -250,3 +252,42 @@ modelo (*data snooping*): el resultado del test deja de ser una estimación hone
 
 **Consecuencias.** El drift diseñado (2026) no se ha mirado en el EDA: lo tendrá que
 descubrir el monitoring de la Fase 12, como en un despliegue real.
+
+---
+
+## 016 — Warm-up de 90 días excluido del entrenamiento
+
+**Contexto.** El extracto empieza el 2024-07-01 para todos los clientes, aunque muchos llevan
+años operando. En los primeros meses todo parece "nuevo": en julio de 2024 el 76,8% de las
+transacciones tienen `merchant_new_for_customer = true`, frente al 24,5% en junio de 2025.
+Es un sesgo de historia truncada, no un cambio de comportamiento.
+
+**Decisión.** Los modelos se entrenan con transacciones desde el 2024-10-01
+(`warmup_days: 90` en `configs/features.yaml`). Las features se siguen calculando desde el
+inicio para que la historia exista cuando empieza el entrenamiento.
+
+**Alternativas.** Ventanas acotadas (p. ej. "comercio no visto en 180 días"): estabilizan la
+feature, pero exigen 180 días de warm-up y pierden información.
+
+**Consecuencias.** Se pierden 3 meses de entrenamiento. `merchant_new_for_customer` sigue
+derivando a los 12 meses: se vigilará en monitoring (Fase 12).
+
+---
+
+## 017 — Features offline con window functions, online con lookups + test de paridad
+
+**Contexto.** El diseño pedía una sola definición por feature. En PostgreSQL la forma eficiente
+de calcular 2,85M filas (window functions) no sirve para una sola transacción en la API, y la
+forma natural para una transacción (lookups LATERAL) es lenta para todo el histórico.
+
+**Decisión.** Offline: window functions con `RANGE ... EXCLUDE GROUP` donde se pueda y LATERAL
+solo para conteos distintos, medianas y etiquetas. Online (Fase 10): lookups por transacción.
+La equivalencia se garantiza con tests: escenario construido a mano con valores esperados,
+test de viaje en el tiempo (borrar el futuro no cambia el pasado) y, en la Fase 10, un test de
+paridad offline/online.
+
+**Alternativas.** Feature store; o lookups LATERAL también offline (una sola implementación,
+pero un build mucho más lento).
+
+**Consecuencias.** Dos implementaciones que pueden divergir: el test de paridad es obligatorio
+en la Fase 10.

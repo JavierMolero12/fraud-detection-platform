@@ -4,7 +4,7 @@ End-to-end fraud risk scoring system built around the problems that make fraud d
 practice: temporal leakage, delayed labels, extreme class imbalance, cost-sensitive decisions,
 calibration and drift.
 
-> **Status:** work in progress. Phase 4 of 14 (EDA + statistics).
+> **Status:** work in progress. Phase 5 of 14 (temporal feature engineering).
 > No model results exist yet; this README will only report numbers produced by real runs.
 
 ## Design
@@ -28,6 +28,7 @@ docker compose up -d db            # PostgreSQL 16 on localhost:5433
 fraud db init                      # creates schemas and tables
 fraud db load data/raw/v1.0.1-small
 fraud dq run                       # rules, quarantine, raw -> core, report
+fraud features build               # 51 point-in-time features (+ leaky variants)
 ```
 
 Scales: `tiny` (tests), `small` (development, ~48k transactions), `full` (~2.9M transactions).
@@ -42,6 +43,7 @@ Reports of the full dataset: [simulation](reports/simulation/v1.0.1-full.md), [d
 | Data quality (47 rules) | `fraud dq run` | `sql/data_quality/`, `dq.rules`, `dq.violations` |
 | Analytical SQL | `psql -f` | `sql/analysis/` |
 | EDA + statistics (train period only) | `jupytext --to ipynb --execute notebooks/02_eda.py` | [`notebooks/02_eda.ipynb`](notebooks/02_eda.ipynb), [findings](reports/eda/eda_findings.md) |
+| Point-in-time features (51) | `fraud features build` | `sql/features/`, [catalog](docs/feature_catalog.md), [findings](reports/features/feature_findings.md) |
 
 ## Tests
 
