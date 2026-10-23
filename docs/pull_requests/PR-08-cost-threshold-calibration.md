@@ -32,7 +32,7 @@ the test period.
 
 | Check | Result |
 |---|---|
-| Unit tests (incl. 20 new: design hand calculation, costs, capacity, P2, calibration, JSON round-trip, sensitivity regret, run-once guard) | 89 passed |
+| Unit tests (incl. 17 new: design hand calculation, costs, capacity, P2, calibration, JSON round-trip, sensitivity regret, run-once guard) | 85 passed |
 | Integration tests | 37 passed |
 | Second `fraud policy evaluate-test` | refused (`TestAlreadyEvaluated`) |
 
