@@ -1,0 +1,99 @@
+{
+  "policy": {
+    "type": "expected_cost"
+  },
+  "policy_name": "P2 expected cost",
+  "calibration": {
+    "method": "platt",
+    "coef": 1.0335547672857095,
+    "intercept": 0.07121613175458735
+  },
+  "costs": {
+    "chargeback_fee": 15.0,
+    "review_cost": 4.0,
+    "reviewer_recall": 0.9,
+    "review_friction": 1.0,
+    "lost_margin_rate": 0.02,
+    "block_friction": 10.0
+  },
+  "review_capacity_per_day": 60,
+  "model": {
+    "family": "hist_gradient_boosting",
+    "params": {
+      "learning_rate": 0.021,
+      "max_iter": 400,
+      "max_leaf_nodes": 31,
+      "min_samples_leaf": 50,
+      "l2_regularization": 0.68,
+      "max_features": 0.8
+    },
+    "columns": [
+      "amount_eur",
+      "local_hour",
+      "customer_age",
+      "account_age_days",
+      "device_age_days",
+      "card_txn_count_5m",
+      "card_txn_count_1h",
+      "card_txn_count_24h",
+      "card_txn_count_7d",
+      "card_amount_sum_1h",
+      "card_amount_sum_24h",
+      "card_micro_count_1h",
+      "card_seconds_since_prev",
+      "card_unique_merchants_24h",
+      "card_unique_countries_24h",
+      "cust_txn_count_24h",
+      "cust_seconds_since_prev",
+      "cust_txn_count_90d",
+      "amount_to_cust_median_90d",
+      "amount_zscore_cust_90d",
+      "cust_unique_devices_30d",
+      "device_txn_count_1h",
+      "device_unique_cards_24h",
+      "device_unique_customers_30d",
+      "distance_from_prev_km",
+      "implied_speed_kmh",
+      "card_prior_fraud_reports",
+      "device_prior_fraud_reports",
+      "merchant_fraud_reports_90d",
+      "merchant_txn_count_90d",
+      "merchant_fraud_rate_90d_smoothed",
+      "is_micro_amount",
+      "is_card_present",
+      "is_night",
+      "cross_border",
+      "merchant_foreign",
+      "merchant_new_for_customer",
+      "category_new_for_customer",
+      "device_new_for_customer",
+      "country_changed",
+      "new_country_for_customer_180d",
+      "impossible_travel",
+      "payment_method",
+      "merchant_category",
+      "merchant_risk_level",
+      "card_type",
+      "customer_segment",
+      "device_type",
+      "operating_system"
+    ],
+    "trained_on": [
+      "2024-10-01",
+      "2025-07-01"
+    ]
+  },
+  "chosen_on": [
+    "2025-07-01",
+    "2025-10-01"
+  ],
+  "lineage": {
+    "dataset_hash": "350d74bdc9880beb22803e1781c3a00d684fc92b63a1e2375f0ee9d6ce4f5f46",
+    "simulator_version": "1.0.1",
+    "dq_run_id": "1",
+    "feature_build_id": "1",
+    "feature_set_version": "1.0.0",
+    "git_commit": "9aa88e7ad722badfdb835bb1609dfe4a67c86084",
+    "git_dirty": "False"
+  }
+}
