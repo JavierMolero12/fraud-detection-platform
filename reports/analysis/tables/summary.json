@@ -1,0 +1,40 @@
+{
+  "outcomes": {
+    "legit approved": 355002,
+    "fraud blocked": 2058,
+    "legit reviewed": 1155,
+    "legit blocked (FP)": 455,
+    "fraud approved (FN)": 429,
+    "fraud reviewed": 121
+  },
+  "label_noise_by_outcome": {
+    "friendly fraud": {
+      "fraud approved (FN)": 153,
+      "fraud blocked": 0,
+      "fraud reviewed": 0,
+      "legit approved": 0,
+      "legit blocked (FP)": 0,
+      "legit reviewed": 0
+    },
+    "none": {
+      "fraud approved (FN)": 276,
+      "fraud blocked": 2058,
+      "fraud reviewed": 121,
+      "legit approved": 354915,
+      "legit blocked (FP)": 128,
+      "legit reviewed": 1115
+    },
+    "unreported fraud": {
+      "fraud approved (FN)": 0,
+      "fraud blocked": 0,
+      "fraud reviewed": 0,
+      "legit approved": 87,
+      "legit blocked (FP)": 327,
+      "legit reviewed": 40
+    }
+  },
+  "shap_rows": 900,
+  "shap_additivity_error": 4.085620730620576e-14,
+  "blocked": 2513,
+  "seconds": 993
+}
