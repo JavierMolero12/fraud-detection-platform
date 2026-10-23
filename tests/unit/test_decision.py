@@ -165,3 +165,13 @@ def test_sensitivity_regret_is_positive_when_an_assumption_is_wrong():
     )
     assert (table["regret_eur"] >= -1e-6).all()
     assert (table["regret_eur"] > 0).any()
+
+
+def test_test_evaluation_refuses_to_run_twice(tmp_path, monkeypatch):
+    from fraudplatform.decision import test_evaluation
+
+    marker = tmp_path / "test_evaluation.json"
+    marker.write_text("{}")
+    monkeypatch.setattr(test_evaluation, "MARKER", marker)
+    with pytest.raises(test_evaluation.TestAlreadyEvaluated):
+        test_evaluation.evaluate_on_test(None, None, None, tmp_path)

@@ -189,5 +189,24 @@ def policy_optimise() -> None:
         )
 
 
+@policy_app.command("evaluate-test")
+def policy_evaluate_test(
+    force: Annotated[bool, typer.Option(help="Re-run although the test was already used")] = False,
+) -> None:
+    """Score the frozen model + policy on the test period. Runs ONCE (see test_evaluation.py)."""
+    from fraudplatform.config import load_model_config, load_splits
+    from fraudplatform.db import connect
+    from fraudplatform.decision.test_evaluation import evaluate_on_test
+
+    with connect() as conn:
+        evaluate_on_test(
+            conn,
+            load_model_config(),
+            load_splits(),
+            PROJECT_ROOT / "data" / "processed" / "phase8",
+            force=force,
+        )
+
+
 if __name__ == "__main__":
     app()
