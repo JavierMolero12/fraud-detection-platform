@@ -110,6 +110,23 @@ def run_phase9(
     df = add_bands(add_outcomes(valid))
     y = df["is_fraud"].to_numpy()
     log.info("validation decisions: %s", df["outcome"].value_counts().to_dict())
+    # Every result is saved as soon as it exists: the expensive steps must not be lost to a
+    # failure further down.
+    keep = [
+        "transaction_id",
+        "ts",
+        "amount_eur",
+        "is_fraud",
+        "is_fraud_true",
+        "scenario",
+        "p",
+        "action",
+        "outcome",
+        "label_noise",
+        *PROFILE_COLUMNS,
+        "channel",
+    ]
+    df[keep].to_parquet(out_dir / "validation_decisions.parquet", index=False)
 
     # --- global importance --------------------------------------------------------------------
     t0 = time.perf_counter()
@@ -120,6 +137,8 @@ def run_phase9(
             groups.setdefault(f.group, []).append(f.name)
     grouped = grouped_permutation_importance(model, df[cols], y, groups, n_repeats=5, seed=seed)
     log.info("permutation importance done (%.0fs)", time.perf_counter() - t0)
+    single.to_csv(out_dir / "permutation_single.csv", lineterminator="\n")
+    grouped.to_csv(out_dir / "permutation_grouped.csv", index=False, lineterminator="\n")
 
     # --- SHAP: a random background and a sample with every kind of decision -------------------
     t0 = time.perf_counter()
@@ -144,6 +163,11 @@ def run_phase9(
     log.info(
         "SHAP on %s rows, additivity error %.1e (%.0fs)", len(sample), err, time.perf_counter() - t0
     )
+    shap_frame = attributions.add_prefix("shap__")
+    shap_frame["base"] = base
+    shap_frame["log_odds"] = log_odds
+    meta = ["transaction_id", "outcome", "p", *cols]  # amount_eur is already one of the cols
+    sample[meta].join(shap_frame).to_parquet(out_dir / "shap_sample.parquet", index=False)
 
     # --- errors and segments ------------------------------------------------------------------
     profiles = {c: error_profile(df, c) for c in PROFILE_COLUMNS}
@@ -163,30 +187,6 @@ def run_phase9(
     }
     scenarios = scenario_breakdown(df)
 
-    # --- save -------------------------------------------------------------------------------
-    keep = [
-        "transaction_id",
-        "ts",
-        "amount_eur",
-        "is_fraud",
-        "is_fraud_true",
-        "scenario",
-        "p",
-        "action",
-        "outcome",
-        "label_noise",
-        *PROFILE_COLUMNS,
-        "channel",
-    ]
-    df[keep].to_parquet(out_dir / "validation_decisions.parquet", index=False)
-    single.to_csv(out_dir / "permutation_single.csv", lineterminator="\n")
-    grouped.to_csv(out_dir / "permutation_grouped.csv", index=False, lineterminator="\n")
-    shap_frame = attributions.add_prefix("shap__")
-    shap_frame["base"] = base
-    shap_frame["log_odds"] = log_odds
-    sample[["transaction_id", "outcome", "p", "amount_eur", *cols]].join(shap_frame).to_parquet(
-        out_dir / "shap_sample.parquet", index=False
-    )
     for name, table in profiles.items():
         table.to_csv(out_dir / f"profile_{name}.csv", lineterminator="\n")
     for name, table in segments.items():
