@@ -1,0 +1,128 @@
+{
+  "period": [
+    "2025-10-01",
+    "2026-01-01"
+  ],
+  "transactions": 387978,
+  "frauds": 2857,
+  "base_rate": 0.007363819598018444,
+  "model": {
+    "base_rate": 0.007363819598018444,
+    "pr_auc": 0.7522622142714819,
+    "roc_auc": 0.952593995712026,
+    "pr_auc_ci_low": 0.7179711302383571,
+    "pr_auc_ci_high": 0.7766544105634435,
+    "brier": 0.0025305079040563025,
+    "log_loss": 0.013043266387316135,
+    "mean_predicted": 0.007258455567594232,
+    "alerts": 1940.0,
+    "precision_at_alert_rate": 0.8871134020618556,
+    "recall_at_alert_rate": 0.6023801190059503,
+    "amount_recall_at_alert_rate": 0.8376609251239159
+  },
+  "rules_pr_auc": 0.26404333533993973,
+  "calibration_raw": {
+    "brier": 0.0025342346873125873,
+    "log_loss": 0.013040856797661185,
+    "ece": 0.0002495783652059303,
+    "mean_predicted": 0.007326710948967986,
+    "observed_rate": 0.007363819598018444,
+    "pr_auc": 0.7522622142714819
+  },
+  "calibration_shipped": {
+    "brier": 0.0025305079040563025,
+    "log_loss": 0.013043266387316135,
+    "ece": 0.00017986019169880007,
+    "mean_predicted": 0.007258455567594232,
+    "observed_rate": 0.007363819598018444,
+    "pr_auc": 0.7522622142714819
+  },
+  "policies": {
+    "approve_all": {
+      "total_cost_eur": 946956.37,
+      "cost_per_1000_txn": 2440.7475939357387,
+      "blocked": 0,
+      "reviewed": 0,
+      "reviews_per_day_mean": 0.0,
+      "reviews_per_day_max": 0,
+      "fraud_blocked": 0,
+      "fraud_reviewed": 0,
+      "fraud_approved": 2857,
+      "legit_blocked": 0,
+      "false_decline_rate": 0.0,
+      "fraud_eur_stopped_share": 0.0,
+      "days": 92
+    },
+    "rules (1 rule: review, 2+: block)": {
+      "total_cost_eur": 482886.46020000003,
+      "cost_per_1000_txn": 1244.6233038986747,
+      "blocked": 1279,
+      "reviewed": 5520,
+      "reviews_per_day_mean": 60.0,
+      "reviews_per_day_max": 60,
+      "fraud_blocked": 912,
+      "fraud_reviewed": 443,
+      "fraud_approved": 1502,
+      "legit_blocked": 367,
+      "false_decline_rate": 0.0009529472555378699,
+      "fraud_eur_stopped_share": 0.5267737820151738,
+      "days": 92
+    },
+    "P1 thresholds (frozen)": {
+      "total_cost_eur": 66962.4506,
+      "cost_per_1000_txn": 172.59342179195727,
+      "blocked": 2903,
+      "reviewed": 791,
+      "reviews_per_day_mean": 8.597826086956522,
+      "reviews_per_day_max": 17,
+      "fraud_blocked": 2289,
+      "fraud_reviewed": 102,
+      "fraud_approved": 466,
+      "legit_blocked": 614,
+      "false_decline_rate": 0.0015943041277936025,
+      "fraud_eur_stopped_share": 0.9482489524377115,
+      "days": 92
+    },
+    "P2 expected cost (frozen, deployed)": {
+      "total_cost_eur": 64097.6716,
+      "cost_per_1000_txn": 165.20955208800498,
+      "blocked": 2737,
+      "reviewed": 1426,
+      "reviews_per_day_mean": 15.5,
+      "reviews_per_day_max": 30,
+      "fraud_blocked": 2195,
+      "fraud_reviewed": 164,
+      "fraud_approved": 498,
+      "legit_blocked": 542,
+      "false_decline_rate": 0.0014073498978243201,
+      "fraud_eur_stopped_share": 0.9549446031698855,
+      "days": 92
+    }
+  },
+  "bundle": {
+    "policy_name": "P2 expected cost",
+    "calibration": "platt",
+    "chosen_on": [
+      "2025-07-01",
+      "2025-10-01"
+    ],
+    "lineage": {
+      "dataset_hash": "350d74bdc9880beb22803e1781c3a00d684fc92b63a1e2375f0ee9d6ce4f5f46",
+      "simulator_version": "1.0.1",
+      "dq_run_id": "1",
+      "feature_build_id": "1",
+      "feature_set_version": "1.0.0",
+      "git_commit": "9aa88e7ad722badfdb835bb1609dfe4a67c86084",
+      "git_dirty": "False"
+    }
+  },
+  "evaluated_with": {
+    "dataset_hash": "350d74bdc9880beb22803e1781c3a00d684fc92b63a1e2375f0ee9d6ce4f5f46",
+    "simulator_version": "1.0.1",
+    "dq_run_id": "1",
+    "feature_build_id": "1",
+    "feature_set_version": "1.0.0",
+    "git_commit": "32ce00ca072a3153c8a2964b36a0eea921bda79d",
+    "git_dirty": "False"
+  }
+}
