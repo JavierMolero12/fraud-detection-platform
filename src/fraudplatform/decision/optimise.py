@@ -103,6 +103,61 @@ def optimise_policies(
     return grid, p1, p2, realized
 
 
+def sensitivity_analysis(
+    deployed: dict, score, y, amount, day, costs: CostModel, capacity: int, factors
+) -> pd.DataFrame:
+    """Move one cost assumption at a time and compare, under the CHANGED costs:
+
+    - the deployed policy, which still decides with the ORIGINAL assumptions (what happens if
+      we were wrong and did not know), and
+    - the policy re-optimised with the changed assumptions (what we would deploy if we knew).
+
+    regret = deployed - re-optimised >= 0: the price of a wrong assumption.
+    A smaller review capacity is a physical limit, so the deployed policy is given it.
+    """
+    rows = []
+    idx = np.arange(len(score))
+    base = asdict(costs) | {"review_capacity_per_day": capacity}
+    for key in base:
+        for factor in factors:
+            changed = dict(base)
+            value = base[key] * factor
+            if key == "reviewer_recall":
+                value = min(value, 1.0)
+            if key == "review_capacity_per_day":
+                value = int(round(value))
+            changed[key] = value
+            cap = changed.pop("review_capacity_per_day")
+            alt_costs = CostModel(**changed)
+            alt_grid, alt_p1, _, alt_realized = optimise_policies(
+                score, y, amount, day, alt_costs, cap, REVIEW_GRID[::3], BLOCK_GRID[::3]
+            )
+            reoptimised = {
+                "P1": float(alt_grid["total_cost_eur"].min()),
+                "P2": float(
+                    alt_realized[idx, bayes_actions(score, amount, day, alt_costs, cap)].sum()
+                ),
+            }
+            kept_actions = decide(deployed, score, amount, day, costs, cap)  # ORIGINAL costs
+            kept = float(alt_realized[idx, kept_actions].sum())
+            best_name = min(reoptimised, key=reoptimised.get)
+            rows.append(
+                {
+                    "assumption": key,
+                    "factor": factor,
+                    "value": value,
+                    "approve_all_eur": float(alt_realized[:, APPROVE].sum()),
+                    "deployed_policy_eur": kept,
+                    "best_reoptimised_eur": reoptimised[best_name],
+                    "best_reoptimised_policy": best_name,
+                    "regret_eur": kept - reoptimised[best_name],
+                    "p1_t_review": alt_p1["t_review"],
+                    "p1_t_block": alt_p1["t_block"],
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def run_optimisation(
     conn: psycopg.Connection,
     model_cfg: ModelConfig,
@@ -175,52 +230,10 @@ def run_optimisation(
         deployed[0],
     )
 
-    # --- 3. sensitivity: move each assumption, re-optimise, measure regret of the base policy -
-    sensitivity = []
-    base = asdict(costs) | {"review_capacity_per_day": capacity}
-    for key in base:
-        for factor in cost_cfg.sensitivity_factors:
-            changed = dict(base)
-            value = base[key] * factor
-            if key == "reviewer_recall":
-                value = min(value, 1.0)
-            if key == "review_capacity_per_day":
-                value = int(round(value))
-            changed[key] = value
-            cap = changed.pop("review_capacity_per_day")
-            alt_costs = CostModel(**changed)
-            alt_grid, alt_p1, _, alt_realized = optimise_policies(
-                q, y, amount, day, alt_costs, cap, REVIEW_GRID[::3], BLOCK_GRID[::3]
-            )
-            reoptimised = {
-                "P1": alt_grid["total_cost_eur"].min(),
-                "P2": float(
-                    alt_realized[
-                        np.arange(len(y)), bayes_actions(q, amount, day, alt_costs, cap)
-                    ].sum()
-                ),
-            }
-            kept = float(
-                alt_realized[
-                    np.arange(len(y)), decide(deployed[1], q, amount, day, alt_costs, cap)
-                ].sum()
-            )
-            best_name = min(reoptimised, key=reoptimised.get)
-            sensitivity.append(
-                {
-                    "assumption": key,
-                    "factor": factor,
-                    "value": value,
-                    "approve_all_eur": float(alt_realized[:, APPROVE].sum()),
-                    "deployed_policy_eur": kept,
-                    "best_reoptimised_eur": float(reoptimised[best_name]),
-                    "best_reoptimised_policy": best_name,
-                    "regret_eur": kept - float(reoptimised[best_name]),
-                    "p1_t_review": alt_p1["t_review"],
-                    "p1_t_block": alt_p1["t_block"],
-                }
-            )
-    sensitivity = pd.DataFrame(sensitivity)
+    # --- 3. sensitivity: what if an assumption is wrong? ----------------------------------------
+    sensitivity = sensitivity_analysis(
+        deployed[1], q, y, amount, day, costs, capacity, cost_cfg.sensitivity_factors
+    )
 
     # --- 4. freeze the bundle ----------------------------------------------------------------
     tags = lineage_tags(conn)

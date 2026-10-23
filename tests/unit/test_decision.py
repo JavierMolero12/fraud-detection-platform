@@ -147,3 +147,21 @@ def test_calibrator_json_round_trip_gives_identical_probabilities(method):
     np.testing.assert_allclose(
         apply_calibration_dict(spec, p_new), apply_calibrator(method, cal, p_new), atol=1e-12
     )
+
+
+def test_sensitivity_regret_is_positive_when_an_assumption_is_wrong():
+    """Regression: the deployed P2 policy used to be re-decided with the CHANGED costs, which
+    is re-optimising it, so every regret came out as exactly 0."""
+    from fraudplatform.decision.optimise import sensitivity_analysis
+
+    rng = np.random.default_rng(5)
+    n = 4000
+    y = rng.random(n) < 0.03
+    p = np.clip(np.where(y, 0.4, 0.02) + rng.normal(0, 0.08, n), 0.0005, 0.999)
+    amount = rng.exponential(150, n)
+    day = np.repeat(np.arange(40), 100)
+    table = sensitivity_analysis(
+        {"type": "expected_cost"}, p, y, amount, day, DESIGN, 50, [0.5, 3.0]
+    )
+    assert (table["regret_eur"] >= -1e-6).all()
+    assert (table["regret_eur"] > 0).any()
