@@ -211,7 +211,9 @@ def policy_evaluate_test(
 
 
 @analyse_app.command("validation")
-def analyse_validation() -> None:
+def analyse_validation(
+    quick: Annotated[bool, typer.Option(help="3 days only: smoke test of the whole job")] = False,
+) -> None:
     """Explanations, error and segment analysis of the frozen bundle on validation (Phase 9)."""
     from fraudplatform.analysis.run import run_phase9
     from fraudplatform.config import load_model_config, load_splits
@@ -223,7 +225,8 @@ def analyse_validation() -> None:
             load_model_config(),
             load_splits(),
             PROJECT_ROOT / "data" / "processed" / "phase8",
-            PROJECT_ROOT / "data" / "processed" / "phase9",
+            PROJECT_ROOT / "data" / "processed" / ("phase9_quick" if quick else "phase9"),
+            quick=quick,
         )
 
 

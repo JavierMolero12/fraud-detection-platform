@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from datetime import timedelta
 from pathlib import Path
 
 import numpy as np
@@ -88,15 +89,18 @@ def run_phase9(
     splits: Splits,
     bundle_dir: Path,
     out_dir: Path,
+    quick: bool = False,
 ) -> dict:
+    """`quick`: 3 days, 1 repetition, small SHAP sample: a smoke test of the whole job."""
     out_dir.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
     seed = model_cfg.random_state
     policy = json.loads((bundle_dir / "policy.json").read_text(encoding="utf-8"))
     model = sio.load(bundle_dir / "model.skops", trusted=pipelines.SKOPS_TRUSTED_TYPES)
     cols = policy["model"]["columns"]
-    valid = prepare(load_features(conn, splits.validation.start, splits.validation.end))
-    context = load_context(conn, splits.validation.start, splits.validation.end)
+    end = splits.validation.start + timedelta(days=3) if quick else splits.validation.end
+    valid = prepare(load_features(conn, splits.validation.start, end))
+    context = load_context(conn, splits.validation.start, end)
     valid = valid.merge(context, on="transaction_id", how="left", validate="one_to_one")
 
     costs = CostModel(**policy["costs"])
@@ -130,12 +134,16 @@ def run_phase9(
 
     # --- global importance --------------------------------------------------------------------
     t0 = time.perf_counter()
-    single = single_permutation_importance(model, df[cols], y, n_repeats=5, seed=seed)
+    single = single_permutation_importance(
+        model, df[cols], y, n_repeats=1 if quick else 5, seed=seed
+    )
     groups = {}
     for f in FEATURES:
         if f.name in cols:
             groups.setdefault(f.group, []).append(f.name)
-    grouped = grouped_permutation_importance(model, df[cols], y, groups, n_repeats=5, seed=seed)
+    grouped = grouped_permutation_importance(
+        model, df[cols], y, groups, n_repeats=1 if quick else 5, seed=seed
+    )
     log.info("permutation importance done (%.0fs)", time.perf_counter() - t0)
     single.to_csv(out_dir / "permutation_single.csv", lineterminator="\n")
     grouped.to_csv(out_dir / "permutation_grouped.csv", index=False, lineterminator="\n")
@@ -143,7 +151,7 @@ def run_phase9(
     # --- SHAP: a random background and a sample with every kind of decision -------------------
     t0 = time.perf_counter()
     rng = np.random.default_rng(seed)
-    background = df.iloc[rng.choice(len(df), 200, replace=False)][cols]
+    background = df.iloc[rng.choice(len(df), 50 if quick else 200, replace=False)][cols]
     picks = []
     for outcome, n in [
         ("fraud blocked", 250),
@@ -154,6 +162,7 @@ def run_phase9(
         ("legit reviewed", 50),
     ]:
         idx = np.flatnonzero(df["outcome"].to_numpy() == outcome)
+        n = min(n, 5) if quick else n
         picks.extend(rng.choice(idx, min(n, len(idx)), replace=False))
     sample = df.iloc[np.sort(picks)]
     attributions, base, log_odds = shap_values(model, sample[cols], background, seed=seed)
