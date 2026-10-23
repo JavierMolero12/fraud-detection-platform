@@ -1,6 +1,6 @@
 # Feature engineering findings (Phase 5)
 
-Feature set **v1.0.0**: 51 point-in-time features (catalog:
+Feature set **v1.0.0**: 50 point-in-time features (catalog:
 [`docs/feature_catalog.md`](../../docs/feature_catalog.md)), built by `fraud features build`
 into `features.transaction_features`. Analysis: [`notebooks/03_feature_analysis.ipynb`](../../notebooks/03_feature_analysis.ipynb),
 **train period only**, eventual labels. All numbers come from that run.
@@ -10,7 +10,7 @@ into `features.transaction_features`. Analysis: [`notebooks/03_feature_analysis.
 | Check | Result |
 |---|---|
 | Hand-built scenario (ties in the same second, micro-charges, a fraud reported after a later payment, impossible travel, shared device) | 9 / 9 tests with exact expected values |
-| **Time-travel test**: delete all transactions after 2025-04-01 and all labels reported after it, rebuild, compare earlier rows (`small` dataset) | **0 of 51** clean features change |
+| **Time-travel test**: delete all transactions after 2025-04-01 and all labels reported after it, rebuild, compare earlier rows (`small` dataset) | **0 of 50** clean features change |
 | Same test on the deliberately leaky features | **5 of 5** change, so the test can catch leakage |
 | One feature row per `core` transaction; no negative counts, gaps or ages | pass |
 | Feature SQL never reads the simulator's `sim` schema | pass (unit test) |

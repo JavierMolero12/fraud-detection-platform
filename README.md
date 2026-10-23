@@ -4,7 +4,7 @@ End-to-end fraud risk scoring system built around the problems that make fraud d
 practice: temporal leakage, delayed labels, extreme class imbalance, cost-sensitive decisions,
 calibration and drift.
 
-> **Status:** work in progress. Phase 8 of 14 (calibration, cost model, decision policy).
+> **Status:** work in progress. Phase 9 of 14 (error analysis + interpretability).
 > No model results exist yet; this README will only report numbers produced by real runs.
 
 ## Design
@@ -28,11 +28,12 @@ docker compose up -d db            # PostgreSQL 16 on localhost:5433
 fraud db init                      # creates schemas and tables
 fraud db load data/raw/v1.0.1-small
 fraud dq run                       # rules, quarantine, raw -> core, report
-fraud features build               # 51 point-in-time features (+ leaky variants)
+fraud features build               # 50 point-in-time features (+ leaky variants)
 fraud models compare               # baselines + models, train -> validation, MLflow
 fraud models tune                  # temporal CV, tuning, leakage experiments (~35 min)
 fraud policy optimise              # calibration + cost-based policy on validation
 fraud policy evaluate-test         # the ONE evaluation on the test period
+fraud analyse validation           # explanations, error and segment analysis (~17 min)
 ```
 
 Scales: `tiny` (tests), `small` (development, ~48k transactions), `full` (~2.9M transactions).
@@ -47,10 +48,11 @@ Reports of the full dataset: [simulation](reports/simulation/v1.0.1-full.md), [d
 | Data quality (47 rules) | `fraud dq run` | `sql/data_quality/`, `dq.rules`, `dq.violations` |
 | Analytical SQL | `psql -f` | `sql/analysis/` |
 | EDA + statistics (train period only) | `jupytext --to ipynb --execute notebooks/02_eda.py` | [`notebooks/02_eda.ipynb`](notebooks/02_eda.ipynb), [findings](reports/eda/eda_findings.md) |
-| Point-in-time features (51) | `fraud features build` | `sql/features/`, [catalog](docs/feature_catalog.md), [findings](reports/features/feature_findings.md) |
+| Point-in-time features (50) | `fraud features build` | `sql/features/`, [catalog](docs/feature_catalog.md), [findings](reports/features/feature_findings.md) |
 | Baselines vs models | `fraud models compare` | `src/fraudplatform/models/`, [comparison](reports/models/phase6_comparison.md), [findings](reports/models/phase6_findings.md) |
 | Temporal CV, tuning, H7/H8 | `fraud models tune` | `models/validation.py`, `models/tuning.py`, [findings](reports/models/phase7_findings.md) |
 | Calibration, cost model, policy, test | `fraud policy optimise`, `fraud policy evaluate-test` | `src/fraudplatform/decision/`, [policy](reports/policy/policy_v1.json), [findings](reports/policy/phase8_findings.md) |
+| Error analysis, explanations, model card | `fraud analyse validation` | `src/fraudplatform/analysis/`, [findings](reports/analysis/phase9_findings.md), [model card](reports/model_card.md) |
 
 ## Tests
 
