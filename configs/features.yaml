@@ -15,4 +15,4 @@ merchant_rate_prior_strength: 50
 
 # History needed before profile and novelty features are meaningful. The data starts on
 # 2024-07-01 for everyone, so early transactions look "new" only because history is missing.
-warmup_days: 90
+warmup_days: 92            # 2024-07-01 + 92 days = 2024-10-01 (Jul + Aug + Sep)
