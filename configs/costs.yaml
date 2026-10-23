@@ -1,0 +1,24 @@
+# Cost model (docs/phase1_design.md, section 10). Every value is an ASSUMPTION, not a measured
+# fact. The method is the deliverable: change these numbers and re-run `fraud policy optimise`.
+#
+# Per transaction with amount A (EUR), true label y (1 = fraud):
+#   approve : y * (A + chargeback_fee)
+#   review  : review_cost + y * (1 - reviewer_recall) * (A + chargeback_fee)
+#                         + (1 - y) * review_friction
+#   block   : (1 - y) * (lost_margin_rate * A + block_friction)
+#
+# The fintech is assumed to absorb 100% of fraud losses (no liability shift).
+
+chargeback_fee: 15.0        # F: fees and handling of a dispute
+review_cost: 4.0            # c_r: ~4 minutes of an analyst
+reviewer_recall: 0.90       # rho: share of reviewed fraud that review/step-up stops
+review_friction: 1.0        # f_r: delay / OTP for a legitimate customer
+lost_margin_rate: 0.02      # m: interchange and fees lost on a wrongly blocked payment
+block_friction: 10.0        # f_b: support contact and churn risk of a wrongful block
+
+# Review capacity per day. Set from the TRAIN period: 31.3 frauds/day -> ~2x that.
+# Reviews beyond capacity cannot happen: the overflow is approved.
+review_capacity_per_day: 60
+
+# Sensitivity analysis: each assumption is moved by these factors, one at a time.
+sensitivity_factors: [0.5, 1.5]

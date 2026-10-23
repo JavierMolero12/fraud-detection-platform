@@ -262,3 +262,20 @@ def load_simulation_config(path: Path | None = None) -> SimulationConfig:
     path = path or CONFIG_DIR / "simulation.yaml"
     with open(path, encoding="utf-8") as fh:
         return SimulationConfig.model_validate(yaml.safe_load(fh))
+
+
+class CostConfig(BaseModel):
+    chargeback_fee: float = Field(ge=0)
+    review_cost: float = Field(ge=0)
+    reviewer_recall: float = Field(ge=0, le=1)
+    review_friction: float = Field(ge=0)
+    lost_margin_rate: float = Field(ge=0, le=1)
+    block_friction: float = Field(ge=0)
+    review_capacity_per_day: int = Field(ge=0)
+    sensitivity_factors: list[float] = [0.5, 1.5]
+
+
+def load_cost_config(path: Path | None = None) -> CostConfig:
+    path = path or CONFIG_DIR / "costs.yaml"
+    with open(path, encoding="utf-8") as fh:
+        return CostConfig.model_validate(yaml.safe_load(fh))
