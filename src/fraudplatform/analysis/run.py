@@ -40,7 +40,7 @@ log = logging.getLogger(__name__)
 PROFILE_COLUMNS = [
     "merchant_category",
     "payment_method",
-    "cross_border",
+    "border",
     "amount_band",
     "customer_segment",
     "device_type",
@@ -76,7 +76,8 @@ def add_bands(df: pd.DataFrame) -> pd.DataFrame:
         [0, 25, 35, 50, 65, 120],
         labels=["18-25", "26-35", "36-50", "51-65", "66+"],
     ).astype(str)
-    out["cross_border"] = out["cross_border"].map({1.0: "cross-border", 0.0: "domestic"})
+    # display copy: the model input `cross_border` must stay numeric
+    out["border"] = out["cross_border"].map({1.0: "cross-border", 0.0: "domestic"})
     out["channel"] = np.where(out["is_card_present"] == 1.0, "card present", "card not present")
     return out
 
@@ -157,7 +158,7 @@ def run_phase9(
             "account_age_band",
             "customer_age_band",
             "amount_band",
-            "cross_border",
+            "border",
         ]
     }
     scenarios = scenario_breakdown(df)
