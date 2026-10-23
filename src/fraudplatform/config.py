@@ -215,6 +215,33 @@ def load_feature_config(path: Path | None = None) -> FeatureConfig:
         return FeatureConfig.model_validate(yaml.safe_load(fh))
 
 
+class EvaluationParams(BaseModel):
+    alert_rate: float = Field(gt=0, lt=1)
+    bootstrap_reps: int = Field(ge=0)
+    bootstrap_seed: int
+
+
+class RuleParams(BaseModel):
+    burst_card_txn_1h: int = Field(ge=1)
+    card_testing_micro_1h: int = Field(ge=1)
+    new_device_amount_eur: float = Field(ge=0)
+    device_many_cards_24h: int = Field(ge=1)
+    risky_categories: list[str]
+
+
+class ModelConfig(BaseModel):
+    random_state: int
+    evaluation: EvaluationParams
+    rules: RuleParams
+    models: dict[str, dict]
+
+
+def load_model_config(path: Path | None = None) -> ModelConfig:
+    path = path or CONFIG_DIR / "model.yaml"
+    with open(path, encoding="utf-8") as fh:
+        return ModelConfig.model_validate(yaml.safe_load(fh))
+
+
 def load_simulation_config(path: Path | None = None) -> SimulationConfig:
     path = path or CONFIG_DIR / "simulation.yaml"
     with open(path, encoding="utf-8") as fh:
