@@ -71,3 +71,22 @@ def test_search_space_parsing_and_leaky_substitution():
     leaky = with_leaky_values(df)
     assert all(leaky[clean].iloc[0] == 1.0 for clean in LEAKY_FEATURES.values())
     assert list(leaky.columns) == list(df.columns)  # same names: the pipeline is unchanged
+
+
+def test_selected_model_is_buildable_and_inside_the_search_space():
+    from fraudplatform.models import pipelines
+
+    cfg = load_model_config()
+    selected = cfg.selected_model
+    space = cfg.tuning[selected["family"]]["space"]
+    for name, value in selected["params"].items():
+        spec = space[name]
+        if isinstance(spec, dict):
+            low, high = spec["loguniform"]
+            assert low <= value <= high, name
+        else:
+            assert value in spec, name
+    # every selected parameter must reach the estimator (regression: two were silently ignored)
+    estimator = pipelines.build_hist_gradient_boosting(selected["params"]).named_steps["model"]
+    for name, value in selected["params"].items():
+        assert getattr(estimator, name) == value, name

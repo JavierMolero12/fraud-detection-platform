@@ -249,6 +249,7 @@ class ModelConfig(BaseModel):
     models: dict[str, dict]
     cross_validation: CrossValidationParams | None = None
     tuning: dict | None = None
+    selected_model: dict | None = None
 
 
 def load_model_config(path: Path | None = None) -> ModelConfig:

@@ -58,3 +58,16 @@ tuning:
       C: [0.01, 0.1, 1.0, 10.0, 100.0]
   # Random forest is not tuned: in Phase 6 it tied with logistic regression and lost to
   # gradient boosting, at 4x the training time.
+
+# Phase 7 outcome (decision 010 / 020). Chosen by temporal cross-validation, confirmed (not
+# chosen) on validation. Phase 8 calibrates this model and optimises the decision policy.
+selected_model:
+  family: hist_gradient_boosting
+  params:
+    learning_rate: 0.021
+    max_iter: 400
+    max_leaf_nodes: 31
+    min_samples_leaf: 50
+    l2_regularization: 0.68
+    max_features: 0.8
+  challenger: logistic_regression   # interpretable reference, C = 10 (C barely matters)

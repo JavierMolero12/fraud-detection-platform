@@ -108,6 +108,9 @@ def build_hist_gradient_boosting(
         max_iter=params.get("max_iter", 400),
         max_leaf_nodes=params.get("max_leaf_nodes", 31),
         l2_regularization=params.get("l2_regularization", 1.0),
+        # defaults = scikit-learn defaults, so Phase 6 results are unchanged
+        min_samples_leaf=params.get("min_samples_leaf", 20),
+        max_features=params.get("max_features", 1.0),
         categorical_features=list(CATEGORICAL),
         # No early stopping: its internal split is random, i.e. not temporal. Phase 7 tunes
         # the number of iterations with time-ordered folds instead.
