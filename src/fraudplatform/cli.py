@@ -250,19 +250,17 @@ def serve_api(
     host: Annotated[str, typer.Option()] = "127.0.0.1",
     port: Annotated[int, typer.Option()] = 8000,
     workers: Annotated[
-        int, typer.Option(help="uvicorn worker processes (on Windows >1 may fail: decision 026)")
+        int,
+        typer.Option(
+            envvar="WEB_CONCURRENCY",
+            help="Worker processes (on Windows >1 may fail: decision 026)",
+        ),
     ] = 1,
 ) -> None:
     """Run the scoring API (POST /predict, GET /health, GET /model)."""
-    import uvicorn
+    from fraudplatform.serving.server import run_api
 
-    uvicorn.run(
-        "fraudplatform.serving.api:create_app",
-        factory=True,
-        host=host,
-        port=port,
-        workers=workers,
-    )
+    run_api(host, port, workers)
 
 
 @serve_app.command("batch")
@@ -310,6 +308,13 @@ def serve_bench(
     batch_csv: Annotated[Path | None, typer.Option(help="Compare with this batch output")] = None,
     keep: Annotated[bool, typer.Option(help="Keep the benchmark rows in the log")] = False,
     repeats: Annotated[int, typer.Option(help="Repeat the measurement; report the median")] = 3,
+    url: Annotated[
+        str | None, typer.Option(help="Measure this running API (e.g. the container) instead")
+    ] = None,
+    output: Annotated[Path, typer.Option(help="Result file")] = PROJECT_ROOT
+    / "reports"
+    / "serving"
+    / "latency.json",
 ) -> None:
     """Latency and throughput of the real API on replayed production payments."""
     from fraudplatform.db import connect
@@ -326,10 +331,11 @@ def serve_bench(
             threads,
             processes or [1, 4],
             port,
-            PROJECT_ROOT / "reports" / "serving" / "latency.json",
+            output,
             batch_csv=batch_csv,
             keep=keep,
             repeats=repeats,
+            url=url,
         )
     typer.echo(result["median_over_repeats"])
     typer.echo(result.get("agreement_with_batch"))
@@ -357,6 +363,68 @@ def serve_profile(
             PROJECT_ROOT / "reports" / "serving" / "latency_breakdown.json",
         )
     typer.echo(result)
+
+
+def _bundle_dir(bundle_dir: Path | None) -> Path:
+    from fraudplatform.config import load_serving_config
+
+    return bundle_dir or load_serving_config().bundle_dir
+
+
+@serve_app.command("demo-bundle")
+def serve_demo_bundle(
+    out: Annotated[Path, typer.Option(help="Bundle folder")] = PROJECT_ROOT
+    / "data"
+    / "processed"
+    / "demo_bundle",
+) -> None:
+    """Train a small stand-in bundle on the loaded data (NOT the Phase 8 model): smoke tests."""
+    from fraudplatform.db import connect
+    from fraudplatform.serving.demo import build_demo_bundle
+
+    with connect() as conn:
+        typer.echo(build_demo_bundle(conn, out))
+
+
+@serve_app.command("check")
+def serve_check(
+    url: Annotated[str, typer.Option(help="Running API, e.g. http://api:8000")],
+    payments: Annotated[int, typer.Option(help="Stored payments to send")] = 50,
+    bundle_dir: Annotated[
+        Path | None, typer.Option(help="The bundle the API serves (default: serving.yaml)")
+    ] = None,
+) -> None:
+    """A running API must give exactly the batch probabilities and decisions. Exit 1 if not."""
+    from fraudplatform.config import load_serving_config
+    from fraudplatform.db import connect
+    from fraudplatform.serving.checks import check_api, check_passed
+    from fraudplatform.serving.scorer import Bundle, Scorer
+
+    scorer = Scorer(Bundle.load(_bundle_dir(bundle_dir)), load_serving_config().risk_levels)
+    with connect() as conn:
+        result = check_api(conn, url, scorer, payments)
+    typer.echo(result)
+    if not check_passed(result):
+        raise typer.Exit(code=1)
+
+
+@serve_app.command("verify-bundle")
+def serve_verify_bundle(
+    bundle_dir: Annotated[Path | None, typer.Option(help="Default: serving.yaml")] = None,
+) -> None:
+    """This environment must reproduce the bundle's saved validation scores. Exit 1 if not."""
+    from fraudplatform.config import load_serving_config
+    from fraudplatform.db import connect
+    from fraudplatform.serving.checks import verify_bundle
+    from fraudplatform.serving.scorer import Bundle, Scorer
+
+    folder = _bundle_dir(bundle_dir)
+    scorer = Scorer(Bundle.load(folder), load_serving_config().risk_levels)
+    with connect() as conn:
+        result = verify_bundle(conn, scorer, folder)
+    typer.echo(result)
+    if not result["passed"]:
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

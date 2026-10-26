@@ -1,8 +1,9 @@
 """API and batch scoring against a real database, with a small model trained on the test data.
 
-The bundle here is NOT the Phase 8 model (that one is not in the repository): a quick
-HistGradientBoosting trained on the first 60% of the small dataset, saved in the same format.
-What is tested is the serving machinery, not model quality.
+The bundle here is NOT the Phase 8 model (that one is not in the repository): the demo bundle
+(`fraud serve demo-bundle`), a quick HistGradientBoosting trained on the first 60% of the small
+dataset and saved in the same format. What is tested is the serving machinery, not model
+quality.
 """
 
 from __future__ import annotations
@@ -10,32 +11,29 @@ from __future__ import annotations
 import dataclasses
 import json
 import threading
-from dataclasses import asdict
 from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 import pandas as pd
 import psycopg
 import pytest
-import skops.io as sio
 from fastapi.testclient import TestClient
 
 from fraudplatform.config import (
     RiskLevels,
     ServingConfig,
-    load_cost_config,
     load_feature_config,
 )
 from fraudplatform.db import load_dataset
-from fraudplatform.decision.costs import CostModel
 from fraudplatform.eda.data import load_features
 from fraudplatform.features.builder import build_features
 from fraudplatform.features.catalog import FEATURE_NAMES
-from fraudplatform.models.comparison import prepare
-from fraudplatform.models.pipelines import build_hist_gradient_boosting, model_columns
+from fraudplatform.models.pipelines import prepare
 from fraudplatform.quality.runner import run_data_quality
 from fraudplatform.serving.api import create_app
 from fraudplatform.serving.batch import OUTPUT_COLUMNS, run_batch, score_period
+from fraudplatform.serving.checks import check_api, check_passed, verify_bundle
+from fraudplatform.serving.demo import build_demo_bundle
 from fraudplatform.serving.online import score_payment
 from fraudplatform.serving.online_features import IncomingTransaction, OnlineFeatureBuilder
 from fraudplatform.serving.scorer import Bundle, Scorer
@@ -50,33 +48,7 @@ def bundle_dir(conn, small, tmp_path_factory):
     load_dataset(conn, write_dataset(small, tmp_path_factory.mktemp("dataset")))
     run_data_quality(conn)
     build_features(conn, load_feature_config())
-
-    df = prepare(load_features(conn, date(2000, 1, 1), date(2100, 1, 1)))
-    cutoff = df["ts"].quantile(0.6)
-    train = df[df["ts"] < cutoff]
-    columns = model_columns("tree")
-    model = build_hist_gradient_boosting({"max_iter": 40, "learning_rate": 0.1})
-    model.fit(train[columns], train["is_fraud"])
-
-    path = tmp_path_factory.mktemp("bundle")
-    sio.dump(model, path / "model.skops")
-    policy = {
-        "policy": {"type": "expected_cost"},
-        "policy_name": "P2 expected cost (test bundle)",
-        "calibration": {"method": "platt", "coef": 1.0, "intercept": 0.0},
-        "costs": asdict(CostModel.from_config(load_cost_config())),
-        "review_capacity_per_day": 60,
-        "model": {
-            "family": "hist_gradient_boosting",
-            "params": {"max_iter": 40},
-            "columns": columns,
-            "trained_on": [str(train["ts"].min().date()), str(cutoff.date())],
-        },
-        "chosen_on": [str(cutoff.date()), str(df["ts"].max().date())],
-        "lineage": {},
-    }
-    (path / "policy.json").write_text(json.dumps(policy), encoding="utf-8")
-    return path
+    return build_demo_bundle(conn, tmp_path_factory.mktemp("bundle"))
 
 
 @pytest.fixture(scope="module")
@@ -344,3 +316,47 @@ def test_batch_output_and_rerun_replaces_earlier_rows(conn, scorer, tmp_path):
     assert out["fraud_probability"].between(0, 1).all()
     assert set(out["decision"]) <= {"approve", "review", "block"}
     assert json.loads((tmp_path / "s.json").read_text())["rows"] == expected_rows
+
+
+def test_check_api_passes_against_the_served_bundle_and_cleans_up(conn, client, scorer):
+    result = check_api(conn, "http://testserver", scorer, payments=30, client=client)
+    assert check_passed(result), result
+    assert result["payments"] == 30
+    leftovers = conn.execute(
+        "SELECT count(*) FROM scoring.predictions WHERE transaction_id LIKE 'check-%'"
+    ).fetchone()[0]
+    assert leftovers == 0
+
+
+def test_check_api_fails_when_the_api_serves_another_model(conn, client, bundle_dir, tmp_path):
+    other = build_demo_bundle(conn, tmp_path / "other", max_iter=5)
+    result = check_api(conn, "http://testserver", Scorer(Bundle.load(other), RISK), 20, client)
+    assert result["served_model_version"] != result["local_model_version"]
+    assert not check_passed(result)
+
+
+def test_verify_bundle_tolerates_last_bit_rounding_but_not_a_different_model(
+    conn, scorer, bundle_dir, tmp_path
+):
+    start, end = (date.fromisoformat(d) for d in scorer.bundle.policy["chosen_on"])
+    df = prepare(load_features(conn, start, end, with_label=False))
+    p_raw = scorer.bundle.model.predict_proba(df[scorer.bundle.columns])[:, 1]
+    pd.DataFrame({"p_raw": p_raw}).to_parquet(bundle_dir / "validation_scores.parquet")
+    exact = verify_bundle(conn, scorer, bundle_dir)
+    assert exact["identical"] and exact["passed"] and exact["differing"] == 0
+
+    def verify_with(saved):
+        folder = tmp_path / str(len(list(tmp_path.iterdir())))
+        folder.mkdir()
+        pd.DataFrame({"p_raw": saved}).to_parquet(folder / "validation_scores.parquet")
+        return verify_bundle(conn, scorer, folder)
+
+    one_ulp = p_raw.copy()
+    one_ulp[0] = np.nextafter(one_ulp[0], 1)  # what another OS's exp() can do
+    result = verify_with(one_ulp)
+    assert not result["identical"] and result["passed"]
+    assert result["differing"] == 1 and result["max_ulps"] == 1
+
+    other_model = p_raw.copy()
+    other_model[0] += 1e-9  # far beyond rounding
+    assert not verify_with(other_model)["passed"]
