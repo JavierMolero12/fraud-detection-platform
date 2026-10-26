@@ -5,9 +5,17 @@ on:
   push:
     branches: [main]
 
+concurrency:   # a new push to the same branch cancels the run it replaces
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16.4
@@ -33,7 +41,7 @@ jobs:
           cache: pip
 
       - name: Install
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[train,dev]"
 
       - name: Lint
         run: |
@@ -41,7 +49,102 @@ jobs:
           ruff format --check .
 
       - name: Unit tests
-        run: pytest
+        run: pytest --cov=fraudplatform --cov-report=
 
       - name: Integration tests (PostgreSQL)
-        run: pytest -m integration
+        run: pytest -m integration --cov=fraudplatform --cov-append --cov-report=xml
+
+      - name: Coverage
+        if: always()
+        run: |
+          coverage report --skip-covered --sort=cover | tail -25
+          echo "### Test coverage (unit + integration)" >> "$GITHUB_STEP_SUMMARY"
+          coverage report --format=markdown --sort=cover >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage.xml
+
+  docker:
+    # The images as they would be deployed, end to end: build both targets, run the whole
+    # data pipeline in the `jobs` container on the tiny dataset, train the demo bundle, start
+    # the API container and check that it gives exactly the batch probabilities and decisions.
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      FRAUD_BUNDLE_HOST_DIR: ./data/processed/demo_bundle
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build app image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: app
+          tags: fraudplatform:app
+          load: true
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,scope=app,mode=max
+
+      - name: Build train image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: train
+          tags: fraudplatform:train
+          load: true
+          cache-from: type=gha,scope=train
+          cache-to: type=gha,scope=train,mode=max
+
+      - name: Image sizes
+        run: |
+          echo "### Images" >> "$GITHUB_STEP_SUMMARY"
+          docker image ls fraudplatform --format '| {{.Tag}} | {{.Size}} |' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Pipeline in containers (tiny dataset)
+        run: |
+          export FRAUD_UID=$(id -u) FRAUD_GID=$(id -g)
+          mkdir -p data reports mlruns
+          docker compose up -d --wait db
+          jobs="docker compose run --rm jobs"
+          $jobs simulate --scale tiny
+          $jobs db init
+          $jobs db load data/raw/v1.0.1-tiny
+          $jobs dq run
+          $jobs features build
+          $jobs serve demo-bundle
+
+      - name: API container and end-to-end check
+        run: |
+          export FRAUD_UID=$(id -u) FRAUD_GID=$(id -g)
+          docker compose up -d --wait --no-build api
+          curl -fsS http://localhost:8000/health
+          docker compose run --rm jobs serve check --url http://api:8000 \
+            --bundle-dir data/processed/demo_bundle --payments 50
+
+      - name: No Nagle delay between workers and clients (decision 027)
+        # With several workers, connections without TCP_NODELAY added ~40 ms to every request.
+        # /model does no work, so its median must stay far below that.
+        run: |
+          export FRAUD_UID=$(id -u) FRAUD_GID=$(id -g)
+          docker compose run --rm --entrypoint python jobs -c "
+          import statistics, time, httpx
+          client = httpx.Client(base_url='http://api:8000')
+          ms = []
+          for _ in range(60):
+              t0 = time.perf_counter()
+              client.get('/model').raise_for_status()
+              ms.append((time.perf_counter() - t0) * 1000)
+          p50 = statistics.median(ms[10:])
+          print(f'GET /model p50 {p50:.1f} ms')
+          assert p50 < 20, 'over 20 ms for a request that does no work: TCP_NODELAY lost?'
+          "
+
+      - name: Container logs
+        if: failure()
+        run: docker compose logs --no-color
