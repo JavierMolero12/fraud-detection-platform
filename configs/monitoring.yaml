@@ -1,0 +1,54 @@
+# Monitoring of the deployed model (Phase 12). Every threshold here was fixed BEFORE running the
+# replay of simulated production (decision 029), so the alerts are not tuned to the known drift.
+
+# Distributions the model was validated on: Phase 8 chose calibration and policy here.
+reference:
+  start: "2025-07-01"
+  end: "2025-10-01"
+
+# A weekly monitoring run, replayed from deployment. Each run only sees transactions with
+# ts < as_of and labels with reported_at < as_of.
+replay:
+  first_as_of: "2026-01-08"   # one week after deployment (2026-01-01)
+  last_as_of: "2026-10-22"    # labels keep arriving for ~4 months after the last payment
+  every_days: 7
+  drift_window_days: 7        # input / prediction drift: the last week's payments
+
+input_drift:
+  bins: 10                    # numeric features: reference deciles (ties merged)
+  psi_warning: 0.10           # usual reading: < 0.1 stable, 0.1-0.25 moderate, > 0.25 major
+  psi_alert: 0.25
+
+prediction_drift:
+  psi_warning: 0.10
+  psi_alert: 0.25
+  rate_warning: 0.25          # review / block rate: relative change vs reference
+  rate_alert: 0.50
+
+labels:
+  # Reporting delays, estimated at deployment from frauds old enough to have all their labels.
+  delay_from: "2024-07-01"
+  delay_to: "2025-07-01"
+  known_before: "2026-01-01"  # deployment: only labels reported before it
+  # Delay-adjusted calibration on the last `recent_days` of payments: observed fraud labels
+  # vs labels expected by now = sum of p * P(reported within the payment's age).
+  recent_days: 56
+  oe_alert_high: 1.25         # 25% more fraud reported than the model expects
+  oe_alert_low: 0.80
+  p_value: 0.01               # and the difference must be beyond Poisson noise
+  min_expected: 30
+  # A weekly cohort is "mature" once 90% of its eventual labels are expected to be in.
+  maturity_share: 0.90
+  recall_drop_alert: 0.05     # recall (review or block) below reference by 5 points...
+                              # ...with p < p_value (one-sided binomial test)
+
+retraining:
+  # Labels decide retraining; input drift alone only triggers an investigation (decision 029).
+  consecutive_runs: 2         # a label alert must persist this many weekly runs
+
+# Judging the monitoring afterwards (monitoring.evaluation): weeks with no injected drift, never
+# used to design the rules, on which any post-hoc rule must also stay silent.
+evaluation:
+  drift_free:
+    start: "2025-01-01"
+    end: "2025-07-01"

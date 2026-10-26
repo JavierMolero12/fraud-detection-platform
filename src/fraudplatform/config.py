@@ -7,7 +7,7 @@ instead of silently producing a different dataset.
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import yaml
@@ -307,3 +307,68 @@ def load_serving_config(path: Path | None = None) -> ServingConfig:
     return cfg.model_copy(
         update={"bundle_dir": bundle if bundle.is_absolute() else PROJECT_ROOT / bundle}
     )
+
+
+class ReplayParams(BaseModel):
+    first_as_of: date
+    last_as_of: date
+    every_days: int = Field(ge=1)
+    drift_window_days: int = Field(ge=1)
+
+    def as_of_dates(self) -> list[date]:
+        days, out = timedelta(days=self.every_days), []
+        current = self.first_as_of
+        while current <= self.last_as_of:
+            out.append(current)
+            current += days
+        return out
+
+
+class InputDriftParams(BaseModel):
+    bins: int = Field(ge=2)
+    psi_warning: float = Field(gt=0)
+    psi_alert: float = Field(gt=0)
+
+
+class PredictionDriftParams(BaseModel):
+    psi_warning: float = Field(gt=0)
+    psi_alert: float = Field(gt=0)
+    rate_warning: float = Field(gt=0)
+    rate_alert: float = Field(gt=0)
+
+
+class LabelMonitoringParams(BaseModel):
+    delay_from: date
+    delay_to: date
+    known_before: date
+    recent_days: int = Field(ge=7)
+    oe_alert_high: float = Field(gt=1)
+    oe_alert_low: float = Field(gt=0, lt=1)
+    p_value: float = Field(gt=0, lt=1)
+    min_expected: float = Field(ge=0)
+    maturity_share: float = Field(gt=0, lt=1)
+    recall_drop_alert: float = Field(gt=0, lt=1)
+
+
+class RetrainingParams(BaseModel):
+    consecutive_runs: int = Field(ge=1)
+
+
+class MonitoringEvaluationParams(BaseModel):
+    drift_free: Period
+
+
+class MonitoringConfig(BaseModel):
+    reference: Period
+    replay: ReplayParams
+    input_drift: InputDriftParams
+    prediction_drift: PredictionDriftParams
+    labels: LabelMonitoringParams
+    retraining: RetrainingParams
+    evaluation: MonitoringEvaluationParams
+
+
+def load_monitoring_config(path: Path | None = None) -> MonitoringConfig:
+    path = path or CONFIG_DIR / "monitoring.yaml"
+    with open(path, encoding="utf-8") as fh:
+        return MonitoringConfig.model_validate(yaml.safe_load(fh))
