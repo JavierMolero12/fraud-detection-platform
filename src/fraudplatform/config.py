@@ -279,3 +279,31 @@ def load_cost_config(path: Path | None = None) -> CostConfig:
     path = path or CONFIG_DIR / "costs.yaml"
     with open(path, encoding="utf-8") as fh:
         return CostConfig.model_validate(yaml.safe_load(fh))
+
+
+class RiskLevels(BaseModel):
+    medium_from: float = Field(gt=0, lt=1)
+    high_from: float = Field(gt=0, lt=1)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> RiskLevels:
+        if self.medium_from >= self.high_from:
+            raise ValueError("risk_levels.medium_from must be below high_from")
+        return self
+
+
+class ServingConfig(BaseModel):
+    bundle_dir: Path
+    risk_levels: RiskLevels
+    log_features: bool = True
+
+
+def load_serving_config(path: Path | None = None) -> ServingConfig:
+    """The bundle directory can be overridden with FRAUD_BUNDLE_DIR (e.g. in a container)."""
+    path = path or CONFIG_DIR / "serving.yaml"
+    with open(path, encoding="utf-8") as fh:
+        cfg = ServingConfig.model_validate(yaml.safe_load(fh))
+    bundle = Path(os.environ.get("FRAUD_BUNDLE_DIR", cfg.bundle_dir))
+    return cfg.model_copy(
+        update={"bundle_dir": bundle if bundle.is_absolute() else PROJECT_ROOT / bundle}
+    )

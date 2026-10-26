@@ -19,12 +19,14 @@ features_app = typer.Typer(no_args_is_help=True, help="Point-in-time feature eng
 models_app = typer.Typer(no_args_is_help=True, help="Baselines, models and evaluation.")
 policy_app = typer.Typer(no_args_is_help=True, help="Calibration, costs and decision policy.")
 analyse_app = typer.Typer(no_args_is_help=True, help="Explanations and error analysis.")
+serve_app = typer.Typer(no_args_is_help=True, help="Real-time API and batch scoring.")
 app.add_typer(db_app, name="db")
 app.add_typer(dq_app, name="dq")
 app.add_typer(features_app, name="features")
 app.add_typer(models_app, name="models")
 app.add_typer(policy_app, name="policy")
 app.add_typer(analyse_app, name="analyse")
+app.add_typer(serve_app, name="serve")
 log = logging.getLogger("fraudplatform")
 
 
@@ -228,6 +230,133 @@ def analyse_validation(
             PROJECT_ROOT / "data" / "processed" / ("phase9_quick" if quick else "phase9"),
             quick=quick,
         )
+
+
+def _period(start: str | None, end: str | None):
+    """Default: the production split (after the test period)."""
+    from datetime import date
+
+    from fraudplatform.config import load_splits
+
+    production = load_splits().production
+    return (
+        date.fromisoformat(start) if start else production.start,
+        date.fromisoformat(end) if end else production.end,
+    )
+
+
+@serve_app.command("api")
+def serve_api(
+    host: Annotated[str, typer.Option()] = "127.0.0.1",
+    port: Annotated[int, typer.Option()] = 8000,
+    workers: Annotated[
+        int, typer.Option(help="uvicorn worker processes (on Windows >1 may fail: decision 026)")
+    ] = 1,
+) -> None:
+    """Run the scoring API (POST /predict, GET /health, GET /model)."""
+    import uvicorn
+
+    uvicorn.run(
+        "fraudplatform.serving.api:create_app",
+        factory=True,
+        host=host,
+        port=port,
+        workers=workers,
+    )
+
+
+@serve_app.command("batch")
+def serve_batch(
+    start: Annotated[str | None, typer.Option(help="YYYY-MM-DD, default: production start")] = None,
+    end: Annotated[str | None, typer.Option(help="YYYY-MM-DD, exclusive")] = None,
+    write_db: Annotated[bool, typer.Option(help="Also append to scoring.predictions")] = True,
+) -> None:
+    """Score a period with the frozen bundle: CSV + scoring.predictions."""
+    from fraudplatform.config import load_serving_config
+    from fraudplatform.db import connect
+    from fraudplatform.serving.batch import run_batch
+    from fraudplatform.serving.scorer import Bundle, Scorer
+
+    first, last = _period(start, end)
+    serving = load_serving_config()
+    scorer = Scorer(Bundle.load(serving.bundle_dir), serving.risk_levels)
+    name = f"batch_{first:%Y%m%d}_{last:%Y%m%d}"
+    with connect() as conn:
+        summary = run_batch(
+            conn,
+            scorer,
+            first,
+            last,
+            PROJECT_ROOT / "data" / "processed" / "scoring" / f"{name}.csv",
+            PROJECT_ROOT / "reports" / "serving" / f"{name}_summary.json",
+            write_db=write_db,
+        )
+    typer.echo(summary)
+
+
+@serve_app.command("bench")
+def serve_bench(
+    sequential: Annotated[int, typer.Option(help="Requests sent one at a time")] = 2000,
+    concurrent: Annotated[
+        int, typer.Option(help="Requests from several threads, per process count")
+    ] = 2000,
+    threads: Annotated[int, typer.Option(help="Client threads for the concurrent runs")] = 8,
+    processes: Annotated[
+        list[int] | None, typer.Option(help="API process counts to compare (repeatable)")
+    ] = None,
+    port: Annotated[int, typer.Option()] = 8765,
+    start: Annotated[str | None, typer.Option(help="Sample period start")] = None,
+    end: Annotated[str | None, typer.Option(help="Sample period end (exclusive)")] = None,
+    batch_csv: Annotated[Path | None, typer.Option(help="Compare with this batch output")] = None,
+    keep: Annotated[bool, typer.Option(help="Keep the benchmark rows in the log")] = False,
+    repeats: Annotated[int, typer.Option(help="Repeat the measurement; report the median")] = 3,
+) -> None:
+    """Latency and throughput of the real API on replayed production payments."""
+    from fraudplatform.db import connect
+    from fraudplatform.serving.bench import run_bench
+
+    first, last = _period(start, end)
+    with connect() as conn:
+        result = run_bench(
+            conn,
+            first,
+            last,
+            sequential,
+            concurrent,
+            threads,
+            processes or [1, 4],
+            port,
+            PROJECT_ROOT / "reports" / "serving" / "latency.json",
+            batch_csv=batch_csv,
+            keep=keep,
+            repeats=repeats,
+        )
+    typer.echo(result["median_over_repeats"])
+    typer.echo(result.get("agreement_with_batch"))
+
+
+@serve_app.command("profile")
+def serve_profile(
+    payments: Annotated[int, typer.Option(help="Payments scored one at a time")] = 500,
+    start: Annotated[str | None, typer.Option(help="Sample period start")] = None,
+    end: Annotated[str | None, typer.Option(help="Sample period end (exclusive)")] = None,
+) -> None:
+    """Milliseconds per step of one online prediction (features, model, log...)."""
+    import psycopg
+
+    from fraudplatform.db import database_url
+    from fraudplatform.serving.bench import run_profile
+
+    first, last = _period(start, end)
+    with psycopg.connect(database_url(), autocommit=True) as conn:
+        result = run_profile(
+            conn,
+            first,
+            last,
+            payments,
+            PROJECT_ROOT / "reports" / "serving" / "latency_breakdown.json",
+        )
+    typer.echo(result)
 
 
 if __name__ == "__main__":

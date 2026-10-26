@@ -1,0 +1,18 @@
+# Serving configuration (API and batch scoring).
+
+# Frozen bundle produced in Phase 8 (model.skops + policy.json). Override with
+# FRAUD_BUNDLE_DIR, e.g. inside the Docker image.
+bundle_dir: data/processed/phase8
+
+# Risk level shown to analysts. Presentation only: the decision comes from the expected-cost
+# policy, which also uses the amount (a 30% risk on a 5 EUR payment can still be approved).
+risk_levels:
+  medium_from: 0.01
+  high_from: 0.25
+
+# Online decisions are made one at a time, so the daily review capacity is applied greedily:
+# once today's reviews reach the capacity, a payment that would be reviewed gets its best
+# alternative (approve or block). The batch job can instead rank a whole day by the benefit
+# of reviewing. With the Phase 8 policy the capacity has not bound so far (busiest day: 24 of
+# 60 reviews on validation, 41 of 60 in the production batch), so both give the same decisions.
+log_features: true
