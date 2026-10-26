@@ -583,3 +583,86 @@ bundle y decide igual que el batch. No prueba el modelo real, para eso está `ve
 local. Con el dataset `tiny` el bundle de demostración apenas revisa o bloquea (en la prueba
 local aprobó los 50 pagos), así que la comparación de decisiones ejercita sobre todo la
 aprobación.
+
+---
+
+## 029 — Monitoring "a fecha", reglas fijadas antes del replay y reentrenamiento decidido por etiquetas
+
+**Contexto.** En producción simulada (enero–junio de 2026) el simulador inyecta un drift el 1
+de marzo: más pago online y con wallet, y un patrón nuevo de fraude con wallet. Las etiquetas
+llegan tarde: mediana de 16 días, p90 de 48 y p99 de 104 días. Medir la caída de rendimiento
+exige esperar, y un monitoring evaluado con los datos de hoy haría trampa sin darse cuenta.
+
+**Decisión.**
+- **Cada ejecución semanal** (42, del 8 de enero al 22 de octubre) usa solo pagos con
+  `ts < fecha` y etiquetas con `reported_at < fecha`. Un test comprueba que cambiar los datos
+  posteriores no cambia el resultado.
+- **Referencia:** el periodo de validación (julio–septiembre de 2025), donde se eligieron la
+  calibración y la política.
+- **Señales:**
+  - PSI semanal de las 49 entradas del modelo y del score (bins fijados en la referencia, el
+    valor 0 y los nulos con bin propio), más KS informativo;
+  - tasas de revisión y bloqueo;
+  - **calibración ajustada por retraso**: fraudes reportados hasta hoy frente a los esperados
+    hasta hoy, `Σ p · F(edad)`, con F la distribución de retrasos estimada en el despliegue;
+  - recall en cohortes maduras (90% de etiquetas esperadas, unos 48 días).
+- **Umbrales fijados en `configs/monitoring.yaml` antes de ejecutar el replay.** PSI 0,10/0,25
+  (la convención del sector); tasas ±25% y ±50%; observado/esperado ≥ 1,25 o ≤ 0,80 con
+  p < 0,01; recall 5 puntos por debajo con p < 0,01.
+- **Reentrenamiento:** solo cuando una alerta de etiquetas se repite en 2 ejecuciones
+  seguidas. El drift de entradas solo abre una investigación: indica que la población cambió,
+  no que el modelo empeorase, y reentrenar exige etiquetas del régimen nuevo.
+- **La verdad del simulador solo la lee `monitoring/evaluation.py`, y después.** Un test
+  impide que la lea cualquier otro código, salvo los análisis de las fases 3 y 9.
+
+**Alternativas.** Evaluar con todas las etiquetas conocidas hoy (fuga temporal: el monitoring
+parecería anticiparse); usar como referencia el periodo de test (se usó una sola vez y no se
+toca); ajustar los umbrales mirando el replay (se ajustarían al drift conocido).
+
+**Consecuencias.** Ver la decisión 030 y `reports/monitoring/phase12_findings.md`.
+
+---
+
+## 030 — Lo aprendido del replay: el PSI con umbral fijo no sirve aquí, y la referencia móvil es una hipótesis
+
+**Contexto.** Resultado del replay con las reglas de la decisión 029, frente al drift del 1 de
+marzo:
+- **Calibración ajustada por retraso:** alerta a los 67 días, sin falsas alarmas antes.
+- **Recomendación de reentrenar:** a los 74 días.
+- **Recall en cohortes maduras:** a los 123 días.
+- **Tasas de decisión:** alertan antes (46 días), pero también lo hicieron en enero, por un pico
+  real de fraude que no tenía nada que ver con el drift.
+- **PSI de entradas con 0,10:** no detectó el drift. Tras el 1 de marzo, el máximo semanal de
+  una entrada estable fue 0,090.
+- **`device_age_days`** alertó en todas las semanas desde la primera (PSI 1,3–1,7): un dispositivo
+  solo envejece, así que deriva por construcción.
+
+El PSI sí mostró el cambio: un escalón de casi 0 a 0,06–0,075 en la primera semana completa de
+marzo, por debajo del umbral convencional.
+
+**Decisión.**
+- **Se publica el resultado con las reglas fijadas**, aunque deje mal al PSI.
+- **Las alternativas diseñadas después se presentan como hipótesis**, no como resultado, y se
+  comprueban sobre 26 semanas sin drift de 2025 que no se usaron para diseñarlas:
+  - PSI ≥ 0,05 frente a la referencia: detecta a los 11 días, pero da 3 falsas alarmas en esas
+    26 semanas, por variables que acumulan historia;
+  - **PSI ≥ 0,03 frente a las 4 semanas anteriores**, excluyendo las variables cuyo PSI semanal
+    ya supera 0,05 dentro de la referencia: detecta a los 11 días, con 0 falsas alarmas en 22
+    semanas sin drift y 0 antes del drift en producción;
+  - calibración con solo p < 0,01, sin umbral de ratio: 39 días en vez de 67, sin falsas
+    alarmas antes del drift.
+- **Propuesta para la siguiente versión de las reglas:**
+  - dos vistas de deriva de entradas: referencia fija para cambios lentos y referencia móvil
+    para escalones;
+  - excluir de la referencia fija las variables que derivan por construcción.
+
+  Validarla exige otro escenario de drift con otra semilla y otra fecha.
+
+**Matiz sobre H9.** Lo que el PSI detecta antes es el cambio de comportamiento legítimo, no el
+fraude nuevo. El modelo sigue cazando el 76% del fraude nuevo, y lo que lo delata es la
+calibración: llega más fraude del que el modelo espera. La hipótesis H9, que el PSI detecta el
+drift antes de que las etiquetas muestren la caída, no se cumple con las reglas fijadas. Se
+cumple solo con la regla diseñada después, y sobre un drift distinto del que hace daño.
+
+**Consecuencias.** Las reglas de `configs/monitoring.yaml` no se cambian en esta fase, para no
+reescribir el resultado. La propuesta queda documentada para la siguiente iteración.

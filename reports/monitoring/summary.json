@@ -1,0 +1,31 @@
+{
+  "score_psi_max_before_drift": 0.0012206570751245433,
+  "score_psi_max_after_drift": 0.021097055817350725,
+  "oe_max_before_drift": 1.0960572329454419,
+  "oe_max_after_drift": 1.7741667522789197,
+  "stable_inputs": 48,
+  "reference_week_noise_max": 0.0088049415563511,
+  "noisy_feature_psi_min": 1.3209296912613184,
+  "noisy_feature_psi_max": 1.6568658158545047,
+  "stable_psi_max_before_drift": 0.022337250957390045,
+  "stable_psi_max_after_drift": 0.08951158066275684,
+  "rolling_max_drift_free": 0.012622024097956408,
+  "rolling_first_days": 11,
+  "rolling_drift_free_weeks": 22,
+  "first_rate_alert_days": 46,
+  "rate_alert_runs_before_drift": 1,
+  "first_label_alert_days": 67,
+  "first_retrain_days": 74,
+  "first_mature_recall_days": 123,
+  "reference": {
+    "review_rate": 0.003552140749401481,
+    "block_rate": 0.006995712933578309,
+    "mean_score": 0.00725660716899811,
+    "recall": 0.8355061349693251
+  },
+  "noisy_features": [
+    "device_age_days"
+  ],
+  "maturity_days": 47.86190046296298,
+  "drift_start": "2026-03-01"
+}

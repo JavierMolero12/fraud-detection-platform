@@ -1,0 +1,5 @@
+rule,production runs alerting before drift,drift-free weeks alerting,days to first alert after drift
+input PSI vs reference >= 0.1 (fixed in advance),0,0 of 26,
+input PSI vs reference >= 0.05,0,3 of 26,11.0
+input PSI vs previous 4 weeks >= 0.03,0,0 of 22,11.0
+labels: observed > expected with Poisson p < 0.01 (no ratio threshold),0,n/a,39.0

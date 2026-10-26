@@ -1,0 +1,9 @@
+rule,severity,runs_alerting,runs_before_drift,first_alert,first_after_drift,days_after_drift,subjects
+input_psi,alert,26,8,2026-01-08,2026-03-05,4,device_age_days
+review_rate,warning,7,2,2026-01-22,2026-03-19,18,review
+block_rate,warning,11,2,2026-01-08,2026-04-02,32,block
+block_rate,alert,4,1,2026-01-22,2026-04-16,46,block
+review_rate,alert,10,0,2026-04-30,2026-04-30,60,review
+label_calibration,alert,16,0,2026-05-07,2026-05-07,67,recent
+retrain,action,15,0,2026-05-14,2026-05-14,74,model
+mature_recall,alert,5,0,2026-07-02,2026-07-02,123,"2026-05-07, 2026-05-21, 2026-05-28, 2026-06-04, 2026-06-11"
