@@ -505,3 +505,81 @@ endpoint bajo demanda.
 workers (`WinError 10022` al compartir el socket); el benchmark arranca procesos independientes
 en puertos consecutivos y reparte las peticiones como un balanceador. En Docker (Linux, Fase 11)
 se usará `--workers`.
+
+---
+
+## 027 — Dos imágenes Docker, versiones fijadas al entorno de entrenamiento y modelo montado
+
+**Contexto.** La API solo necesita la parte de servir: features, modelo y política. MLflow, SHAP
+y matplotlib solo hacen falta para entrenar y analizar (fases 6–9), y la API los importaba
+indirectamente. Además, un modelo debe servirse con las mismas librerías con las que se
+entrenó: otra versión de scikit-learn puede cargar el fichero y puntuar distinto sin avisar.
+
+**Decisión.**
+- Un `Dockerfile` con dos destinos: `app` (API y comandos `fraud serve`, solo dependencias
+  base) y `train` (todo el pipeline, con el extra `train` de `pyproject.toml`).
+- Las dependencias se instalan desde ficheros lock generados dentro de la imagen base,
+  restringidos a las versiones del entorno de entrenamiento (`docker/lock.sh`,
+  `docker/training-env-constraints.txt`). La imagen base de Python va fijada por digest.
+- El bundle del modelo no se copia en la imagen: se monta en solo lectura. La imagen es código;
+  el modelo es un artefacto versionado aparte, igual que lo sería en un registro de modelos.
+- La API corre como usuario sin privilegios, con sistema de ficheros de solo lectura y
+  healthcheck.
+- `fraud serve verify-bundle` puntúa de nuevo el periodo de validación en el entorno donde corre
+  y lo compara con las puntuaciones guardadas en la Fase 8.
+
+**Hallazgo.** Con las mismas versiones, Linux no reproduce Windows bit a bit:
+- la salida de los árboles (log-odds) es idéntica en las 359.220 transacciones;
+- 1.446 probabilidades difieren en 1–2 ulps (1,1e-16): la sigmoide usa el `exp()` de la librería
+  matemática de cada sistema operativo;
+- ninguna decisión cambia.
+
+Por eso `verify-bundle` informa del resultado exacto y aprueba hasta 4 ulps. Una diferencia
+mayor indicaría otro modelo u otras entradas.
+
+**Segundo hallazgo: `uvicorn --workers` añade ~40 ms por petición en Linux.** Con varios
+workers, uvicorn crea el socket de escucha con protocolo 0, y asyncio solo activa
+`TCP_NODELAY` si el socket declara `IPPROTO_TCP`. Sin `TCP_NODELAY`, el cuerpo de la respuesta
+espera al ACK retardado del cliente. Medido en el contenedor con 4 workers:
+- `GET /model` (sin trabajo): 44 ms, frente a 1,3 ms con un solo worker;
+- `POST /predict`: 88 ms en el cliente, aunque el servidor tarda 42 ms.
+
+Arreglo: `fraud serve api` (`serving/server.py`) arranca uvicorn con el mismo socket declarado
+como TCP. Con él, 0,9 ms y 44,6 ms. Un paso de la CI falla si una petición sin trabajo supera
+20 ms. Esto corrige la consecuencia de la decisión 026, que preveía usar `--workers` en Docker.
+
+**Alternativas.** Una sola imagen con todo (más pesada para servir); copiar el modelo en la
+imagen (una imagen por modelo, y datos dentro de un artefacto de código); versiones sin fijar
+(no reproducible).
+
+**Consecuencias.** Las imágenes pesan 682 MB (`app`) y 944 MB (`train`). En `app`, pyarrow y
+scipy ocupan 156 y 139 MB. pyarrow se mantiene porque determina cómo guarda pandas los textos de
+las categorías en el entorno de entrenamiento. Al actualizar una librería hay que reentrenar,
+regenerar los locks y volver a pasar `verify-bundle`.
+
+---
+
+## 028 — La CI prueba las imágenes de extremo a extremo con un bundle de demostración
+
+**Contexto.** La CI de las fases anteriores ejecutaba lint, tests unitarios y tests de
+integración con PostgreSQL, pero no construía ni arrancaba ninguna imagen. El bundle real
+(Fase 8) no está en git y entrenarlo en la CI llevaría más de 35 minutos.
+
+**Decisión.**
+- Un segundo job, que solo corre si el primero pasa, construye las dos imágenes con caché.
+- En contenedores, sobre el dataset `tiny`: simula, carga, calidad de datos, features y un
+  bundle de demostración (`fraud serve demo-bundle`: un modelo pequeño con el mismo formato,
+  claramente marcado como tal).
+- Arranca la API y la compara con el batch mediante `fraud serve check`: 50 pagos
+  almacenados, la misma probabilidad y la misma decisión. Si alguno difiere, la CI falla.
+- La cobertura de tests (unitarios + integración) se publica en cada ejecución, sin umbral
+  mínimo por ahora.
+
+**Alternativas.** Solo `docker build` (no prueba que la imagen funcione); subir el bundle real
+como secreto o artefacto (datos y modelo fuera del repositorio público por diseño).
+
+**Consecuencias.** La CI prueba que la imagen arranca, se conecta a la base de datos, carga un
+bundle y decide igual que el batch. No prueba el modelo real, para eso está `verify-bundle` en
+local. Con el dataset `tiny` el bundle de demostración apenas revisa o bloquea (en la prueba
+local aprobó los 50 pagos), así que la comparación de decisiones ejercita sobre todo la
+aprobación.

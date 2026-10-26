@@ -1,0 +1,19 @@
+{
+  "rows": 359220,
+  "tree_output": {
+    "rows_differing": 0,
+    "max_abs_difference": 0.0,
+    "max_ulps": 0
+  },
+  "p_raw": {
+    "rows_differing": 1446,
+    "max_abs_difference": 1.1102230246251565e-16,
+    "max_ulps": 2
+  },
+  "q": {
+    "rows_differing": 1423,
+    "max_abs_difference": 1.1102230246251565e-16,
+    "max_ulps": 2
+  },
+  "decisions_identical": 359220
+}
