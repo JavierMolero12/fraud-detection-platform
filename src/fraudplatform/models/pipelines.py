@@ -5,6 +5,7 @@ validation/test distribution)."""
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.impute import SimpleImputer
@@ -44,6 +45,14 @@ def model_columns(kind: str) -> list[str]:
     if kind == "linear":
         return [*LINEAR_NUMERIC, *BOOLEAN, *LINEAR_CATEGORICAL]
     return [*TREE_NUMERIC, *BOOLEAN, *CATEGORICAL]
+
+
+def prepare(df: pd.DataFrame) -> pd.DataFrame:
+    """Categoricals as plain strings so that encoders see the same values in every split."""
+    df = df.copy()
+    for col in CATEGORICAL:
+        df[col] = df[col].astype(str)
+    return df
 
 
 def build_logistic_regression(params: dict, class_weight=None, random_state: int = 0) -> Pipeline:

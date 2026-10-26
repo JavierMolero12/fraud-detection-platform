@@ -18,7 +18,7 @@ from fraudplatform.db import load_dataset
 from fraudplatform.eda.data import load_features
 from fraudplatform.features.builder import build_features
 from fraudplatform.features.catalog import CATEGORICAL, FEATURE_NAMES
-from fraudplatform.models.comparison import prepare
+from fraudplatform.models.pipelines import prepare
 from fraudplatform.quality.runner import run_data_quality
 from fraudplatform.serving.online_features import (
     IncomingTransaction,

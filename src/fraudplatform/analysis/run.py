@@ -34,7 +34,7 @@ from fraudplatform.decision.optimise import decide
 from fraudplatform.eda.data import load_features
 from fraudplatform.features.catalog import FEATURES
 from fraudplatform.models import pipelines
-from fraudplatform.models.comparison import prepare
+from fraudplatform.models.pipelines import prepare
 
 log = logging.getLogger(__name__)
 
