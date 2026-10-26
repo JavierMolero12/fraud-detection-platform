@@ -1,0 +1,12 @@
+# Allow-list: the build context is only what the images need. Data, models, MLflow runs,
+# notebooks and git history never enter an image.
+*
+!pyproject.toml
+!README.md
+!src/
+!configs/
+!sql/
+!docker/requirements.lock
+!docker/requirements-train.lock
+**/__pycache__
+**/*.egg-info
