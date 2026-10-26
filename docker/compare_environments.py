@@ -74,4 +74,4 @@ if __name__ == "__main__":
         print(json.dumps(res, indent=2))
         if "--json" in sys.argv:
             out = Path(sys.argv[sys.argv.index("--json") + 1])
-            out.write_text(json.dumps(res, indent=2) + "\n", encoding="utf-8")
+            out.write_text(json.dumps(res, indent=2) + "\n", encoding="utf-8", newline="\n")
