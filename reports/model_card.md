@@ -1,6 +1,6 @@
 # Model card: transaction fraud risk score v1
 
-Draft (Phase 9). Final version in Phase 13. Every number below comes from a recorded run;
+Draft (Phases 9–10). Final version in Phase 13. Every number below comes from a recorded run;
 sources are linked.
 
 ## Model details
@@ -13,6 +13,7 @@ sources are linked.
 | Decision policy | per transaction, the action (approve / review / block) with the lowest expected cost, max 60 reviews per day (decision 021) |
 | Artefacts | `data/processed/phase8/model.skops` (skops, explicit trusted types), [`reports/policy/policy_v1.json`](policy/policy_v1.json); hashes in [`frozen_bundle.sha256`](policy/frozen_bundle.sha256) |
 | Lineage | dataset v1.0.1 `350d74bd…`, feature set v1.0.0, data quality run and feature build recorded in MLflow tags |
+| Serving | real-time `POST /predict` and batch `fraud serve batch`, both from the same frozen bundle: model version `fcf88c67457e`, policy version `65a2111fa8c2` (first 12 hex digits of their SHA-256). Online and offline model inputs are identical bit for bit (decision 024); see [serving findings](serving/phase10_findings.md) |
 | Author | portfolio project; synthetic data only |
 
 ## Purpose
