@@ -20,6 +20,7 @@ models_app = typer.Typer(no_args_is_help=True, help="Baselines, models and evalu
 policy_app = typer.Typer(no_args_is_help=True, help="Calibration, costs and decision policy.")
 analyse_app = typer.Typer(no_args_is_help=True, help="Explanations and error analysis.")
 serve_app = typer.Typer(no_args_is_help=True, help="Real-time API and batch scoring.")
+monitor_app = typer.Typer(no_args_is_help=True, help="Drift, delayed performance, alerts.")
 app.add_typer(db_app, name="db")
 app.add_typer(dq_app, name="dq")
 app.add_typer(features_app, name="features")
@@ -27,6 +28,7 @@ app.add_typer(models_app, name="models")
 app.add_typer(policy_app, name="policy")
 app.add_typer(analyse_app, name="analyse")
 app.add_typer(serve_app, name="serve")
+app.add_typer(monitor_app, name="monitor")
 log = logging.getLogger("fraudplatform")
 
 
@@ -425,6 +427,114 @@ def serve_verify_bundle(
     typer.echo(result)
     if not result["passed"]:
         raise typer.Exit(code=1)
+
+
+def _monitoring_data(conn):
+    from fraudplatform.config import (
+        load_monitoring_config,
+        load_serving_config,
+        load_splits,
+    )
+    from fraudplatform.monitoring.run import load_monitoring_data
+    from fraudplatform.serving.scorer import Bundle, Scorer
+
+    cfg = load_monitoring_config()
+    serving = load_serving_config()
+    scorer = Scorer(Bundle.load(serving.bundle_dir), serving.risk_levels)
+    return cfg, load_monitoring_data(conn, cfg, scorer, load_splits().production)
+
+
+@monitor_app.command("run")
+def monitor_run(
+    as_of: Annotated[str, typer.Option(help="Monitoring date YYYY-MM-DD (data before it)")],
+) -> None:
+    """One monitoring run, as it would run on that date. Stored in the monitoring schema."""
+    from datetime import date
+
+    from fraudplatform.db import connect
+    from fraudplatform.monitoring.run import monitor_as_of, write_tables
+
+    with connect() as conn:
+        cfg, data = _monitoring_data(conn)
+        result = monitor_as_of(data, cfg, date.fromisoformat(as_of))
+        day = result.as_of
+        tables = {
+            name: getattr(result, name).assign(as_of=day)
+            for name in ("feature_drift", "metrics", "label_cohorts", "alerts")
+        }
+        write_tables(conn, tables)
+    typer.echo(result.alerts.to_string(index=False) if len(result.alerts) else "no alerts")
+
+
+@monitor_app.command("replay")
+def monitor_replay() -> None:
+    """Every weekly run since deployment (configs/monitoring.yaml), into the monitoring schema."""
+    from fraudplatform.db import connect
+    from fraudplatform.monitoring.run import replay, write_tables
+
+    with connect() as conn:
+        cfg, data = _monitoring_data(conn)
+        tables = replay(data, cfg)
+        write_tables(conn, tables)
+    alerts = tables["alerts"]
+    runs = len(cfg.replay.as_of_dates())
+    typer.echo(f"{len(alerts)} alerts in {alerts['as_of'].nunique()} of {runs} runs")
+
+
+@monitor_app.command("report")
+def monitor_report() -> None:
+    """Judge the replayed alerts against the simulator's truth; HTML report + tables."""
+    import json
+
+    from fraudplatform.config import load_simulation_config
+    from fraudplatform.db import connect
+    from fraudplatform.eda.data import load_features
+    from fraudplatform.models.pipelines import prepare
+    from fraudplatform.monitoring.evaluation import evaluate, weekly_truth
+    from fraudplatform.monitoring.report import build_report
+    from fraudplatform.monitoring.run import read_tables
+
+    out = PROJECT_ROOT / "reports" / "monitoring"
+    out.mkdir(parents=True, exist_ok=True)
+    drift_start = load_simulation_config().drift.start  # the truth: evaluation only
+    with connect() as conn:
+        cfg, data = _monitoring_data(conn)
+        tables = read_tables(conn, cfg.replay.as_of_dates())
+        free = cfg.evaluation.drift_free
+        drift_free = prepare(load_features(conn, free.start, free.end, with_label=False))
+        truth = weekly_truth(conn, data)
+    result = evaluate(
+        tables,
+        data,
+        drift_free,
+        drift_start,
+        truth,
+        cfg.replay.drift_window_days,
+        cfg.labels.maturity_share,
+        cfg.labels.recall_drop_alert,
+    )
+    page = build_report(
+        tables,
+        result,
+        data.reference_metrics,
+        drift_start,
+        data.production_start.date(),
+        cfg.replay.last_as_of,
+    )
+    (out / "monitoring_report.html").write_text(page, encoding="utf-8", newline="\n")
+    result["timeline"].to_csv(out / "alert_timeline.csv", index=False, lineterminator="\n")
+    result["posthoc"].to_csv(out / "posthoc_rules.csv", index=False, lineterminator="\n")
+    truth.to_csv(out / "weekly_truth.csv", index=False, lineterminator="\n")
+    summary = result["summary"] | {
+        "reference": data.reference_metrics,
+        "noisy_features": result["noisy_features"],
+        "maturity_days": result["maturity_days"],
+        "drift_start": str(drift_start),
+    }
+    with open(out / "summary.json", "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(summary, fh, indent=2, default=str)
+        fh.write("\n")
+    typer.echo(json.dumps(summary, indent=2, default=str))
 
 
 if __name__ == "__main__":
