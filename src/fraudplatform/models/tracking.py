@@ -34,13 +34,29 @@ def experiment_id(name: str) -> str:
     return mlflow.create_experiment(name, artifact_location=artifacts.as_uri())
 
 
-def _git(*args: str) -> str:
+UNKNOWN = "unknown"
+
+
+def _git(*args: str) -> str | None:
     try:
         return subprocess.run(
             ["git", *args], cwd=PROJECT_ROOT, capture_output=True, text=True, check=True
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
-        return "unknown"
+        return None
+
+
+def code_version() -> tuple[str, str]:
+    """(commit, dirty) of the code that is running.
+
+    From git when there is a repository. In a Docker image there is none: the commit is baked
+    in at build time (FRAUD_GIT_COMMIT, from the GIT_COMMIT build argument), and whether that
+    working tree had uncommitted changes cannot be known, so it is "unknown", never a guess.
+    """
+    commit = _git("rev-parse", "HEAD")
+    if commit is not None:
+        return commit, str(bool(_git("status", "--porcelain")))
+    return os.environ.get("FRAUD_GIT_COMMIT") or UNKNOWN, UNKNOWN
 
 
 def lineage_tags(conn: psycopg.Connection) -> dict[str, str]:
@@ -51,12 +67,13 @@ def lineage_tags(conn: psycopg.Connection) -> dict[str, str]:
         "SELECT build_id, feature_set_version, dq_run_id FROM features.builds "
         "ORDER BY build_id DESC LIMIT 1"
     ).fetchone()
+    commit, dirty = code_version()
     return {
         "dataset_hash": dataset_hash,
         "simulator_version": simulator_version,
         "dq_run_id": str(dq_run_id),
         "feature_build_id": str(build_id),
         "feature_set_version": feature_version,
-        "git_commit": _git("rev-parse", "HEAD"),
-        "git_dirty": str(bool(_git("status", "--porcelain"))),
+        "git_commit": commit,
+        "git_dirty": dirty,
     }

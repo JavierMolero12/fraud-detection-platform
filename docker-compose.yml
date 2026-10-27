@@ -47,6 +47,8 @@ services:
     build:
       context: .
       target: app
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}   # GIT_COMMIT=$(git rev-parse HEAD) docker compose build
     image: fraudplatform:app
     depends_on:
       db:
@@ -67,6 +69,8 @@ services:
     build:
       context: .
       target: train
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}   # GIT_COMMIT=$(git rev-parse HEAD) docker compose build
     image: fraudplatform:train
     profiles: ["jobs"]
     depends_on:

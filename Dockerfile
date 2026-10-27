@@ -45,6 +45,10 @@ ENV FRAUD_PROJECT_ROOT=/app \
     FRAUD_BUNDLE_DIR=/app/bundle \
     OMP_NUM_THREADS=1 \
     WEB_CONCURRENCY=2
+# The image has no git: the commit it was built from is recorded here (lineage of MLflow runs
+# and of the bundle). docker compose passes it from GIT_COMMIT, CI from github.sha.
+ARG GIT_COMMIT=unknown
+ENV FRAUD_GIT_COMMIT=${GIT_COMMIT}
 USER 10001
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=3 \
@@ -61,6 +65,8 @@ COPY configs ./configs
 COPY sql ./sql
 ENV FRAUD_PROJECT_ROOT=/app \
     MPLBACKEND=Agg
+ARG GIT_COMMIT=unknown
+ENV FRAUD_GIT_COMMIT=${GIT_COMMIT}
 USER 10001
 ENTRYPOINT ["fraud"]
 CMD ["--help"]
