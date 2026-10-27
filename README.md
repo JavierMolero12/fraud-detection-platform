@@ -150,6 +150,7 @@ Phase by phase, one branch and one pull request each; every PR description is in
 | 11 · Docker and CI | [PR-11](docs/pull_requests/PR-11-docker-ci.md) |
 | 12 · monitoring | [PR-12](docs/pull_requests/PR-12-monitoring.md) |
 | 13 · documentation | [PR-13](docs/pull_requests/PR-13-documentation.md) |
+| 14 · tech-lead review | [PR-14](docs/pull_requests/PR-14-tech-lead-review.md) |
 
 ## Tests
 
@@ -172,7 +173,9 @@ end.
 - **Measured on a laptop:** latency and timings come from a shared machine.
 - **Not hardened for exposure:** the API has no authentication.
 
-The full list is in the [final report](reports/final_report.md#13-limitations).
+The full list is in the [final report](reports/final_report.md#13-limitations). A
+[tech-lead review](docs/tech_lead_review.md) scores each area and ranks what to fix before real
+traffic.
 
 ## License
 
