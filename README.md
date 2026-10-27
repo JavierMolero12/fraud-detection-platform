@@ -1,81 +1,95 @@
 # Transaction Fraud Detection & Risk Scoring Platform
 
-End-to-end fraud risk scoring system built around the problems that make fraud detection hard in
-practice: temporal leakage, delayed labels, extreme class imbalance, cost-sensitive decisions,
-calibration and drift.
+[![CI](https://github.com/JavierMolero12/fraud-detection-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/JavierMolero12/fraud-detection-platform/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **Status:** work in progress. Phase 12 of 14 (monitoring + drift).
-> Every number in the reports comes from a recorded run.
+An end-to-end fraud risk scoring system for card payments. It is built around the problems that
+make fraud detection hard in practice: temporal leakage, labels that arrive weeks late, extreme
+class imbalance, decisions that should depend on cost, calibration, and drift.
 
-## Design
+It goes from a scenario-based simulator to SQL data quality, 50 point-in-time features, models
+validated in time, a cost-based approve/review/block policy, a real-time API, Docker images with
+CI, and monitoring that only uses what is known on each day. **Every number in the reports comes
+from a recorded run**, including the ones that did not go as expected.
 
-- Technical design (Phase 1): [`docs/phase1_design.md`](docs/phase1_design.md)
-- Decision log: [`docs/decisions.md`](docs/decisions.md)
+> **The data is synthetic** (2.85M simulated payments). The project demonstrates method, not
+> discoveries about real fraud: where the simulator makes a result true by construction, the
+> reports say so.
 
-The design documents are currently in Spanish; they will be translated in the documentation phase.
+## Results
 
-## Quickstart
+| | |
+|---|---|
+| Ranking, validation → the single test evaluation | PR-AUC 0.792 → **0.752** (base rate 0.73%; seven expert rules: 0.256) |
+| Cost of the deployed policy on test | **€64,098** vs €946,956 approving everything (−93.2%) and €482,886 for the rules |
+| Fraud EUR stopped on test | **95.5%**; real false decline rate 0.036% once label noise is removed |
+| Leakage, measured | a model with leaky features scores 0.852 offline and **0.401** in production |
+| Real-time API | 44.6 ms p50 per request in Docker; online features identical to training, bit for bit |
+| Drift injected in production | the label-based monitoring alerted after **67 days**; input PSI with the usual threshold never did |
 
-Requirements: Python 3.11+, Docker. Everything below also runs in containers (next section).
+The whole story, with its limitations: **[final report](reports/final_report.md)** ·
+[model card](reports/model_card.md) · [monitoring report](reports/monitoring/monitoring_report.html).
 
-```bash
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -e ".[train,dev]"        # train: MLflow, SHAP, matplotlib; add ,analysis for notebooks
+## How it works
 
-fraud simulate --scale small       # writes data/raw/v<version>-small/
-docker compose up -d db            # PostgreSQL 16 on localhost:5433
-fraud db init                      # creates schemas and tables
-fraud db load data/raw/v1.0.1-small
-fraud dq run                       # rules, quarantine, raw -> core, report
-fraud features build               # 50 point-in-time features (+ leaky variants)
-fraud models compare               # baselines + models, train -> validation, MLflow
-fraud models tune                  # temporal CV, tuning, leakage experiments (~35 min)
-fraud policy optimise              # calibration + cost-based policy on validation
-fraud policy evaluate-test         # the ONE evaluation on the test period
-fraud analyse validation           # explanations, error and segment analysis (~17 min)
-fraud serve batch                  # score the production period: CSV + scoring.predictions
-fraud serve api                    # real-time API on http://127.0.0.1:8000 (docs at /docs)
-fraud serve bench                  # latency and throughput of the real API
-fraud serve verify-bundle          # this environment reproduces the frozen model's scores
-fraud monitor replay               # weekly monitoring runs since deployment, as of each date
-fraud monitor report               # alerts vs the injected drift: HTML report + tables
+```mermaid
+flowchart LR
+    SIM[Simulator] --> RAW[(raw)] --> DQ[Data quality<br/>47 rules] --> CORE[(core)]
+    CORE --> FEAT[Point-in-time<br/>features] --> MOD[Models · temporal CV<br/>cost policy]
+    MOD --> BUNDLE[[Frozen bundle]]
+    BUNDLE --> API[API /predict] & BATCH[Batch scoring]
+    CORE --> API
+    API & BATCH --> PRED[(scoring)] --> MON[Monitoring<br/>delayed labels]
 ```
 
-The API and the batch job load the frozen bundle written by `fraud policy optimise`
-(`data/processed/phase8/`, not in git; override with `FRAUD_BUNDLE_DIR`).
+One PostgreSQL database with layered schemas, one `fraud` CLI with a command per step, two Docker
+images. Details: [architecture](docs/architecture.md) · [Phase 1 design](docs/phase1_design.md) ·
+[decision log](docs/decisions.md) (30 decisions with context and alternatives).
 
-Scales: `tiny` (tests), `small` (development, ~48k transactions), `full` (~2.9M transactions).
-Reports of the full dataset: [simulation](reports/simulation/v1.0.1-full.md), [data quality](reports/data_quality/dq_report.md).
+## Quick check (about 5 minutes, Docker only)
 
-## Docker
-
-Two images from one [`Dockerfile`](Dockerfile) (decision 027). Both pin the libraries to the
-versions the model was trained with ([`docker/`](docker/)).
-- `app`: the API and the `fraud serve` commands.
-- `train`: every `fraud` command.
-
-The model bundle is mounted read-only, never copied into an image.
+Runs the data pipeline and the API on the `tiny` dataset with a stand-in model, exactly as CI
+does. It shows that everything wires together, not the model's quality.
 
 ```bash
-docker compose up -d api                              # db + API on http://localhost:8000
-docker compose run --rm jobs features build           # any `fraud` command, in a container
-docker compose run --rm --entrypoint fraud api serve verify-bundle   # the served env vs Phase 8
+git clone https://github.com/JavierMolero12/fraud-detection-platform.git
+cd fraud-detection-platform
+docker compose up -d db
+docker compose run --rm jobs simulate --scale tiny
+docker compose run --rm jobs db init
+docker compose run --rm jobs db load data/raw/v1.0.1-tiny
+docker compose run --rm jobs dq run
+docker compose run --rm jobs features build
+docker compose run --rm jobs serve demo-bundle
+FRAUD_BUNDLE_HOST_DIR=./data/processed/demo_bundle docker compose up -d api
+curl http://localhost:8000/health
+docker compose run --rm jobs serve check --url http://api:8000 --bundle-dir data/processed/demo_bundle
 ```
 
-- **Without the Phase 8 bundle** (it is not in git), train a stand-in on the loaded data:
-  `docker compose run --rm jobs serve demo-bundle`, then start the API with
-  `FRAUD_BUNDLE_HOST_DIR=./data/processed/demo_bundle`. CI does exactly this on the tiny dataset
-  ([`ci.yml`](.github/workflows/ci.yml)).
-- **Settings:** `API_WORKERS` (default 2) and `API_PORT`.
-- **On Linux**, run `jobs` as your user so the files it writes stay yours:
-  `FRAUD_UID=$(id -u) FRAUD_GID=$(id -g)`.
+On Linux, add `FRAUD_UID=$(id -u) FRAUD_GID=$(id -g)` so the files written by the containers are
+yours.
+
+## Full reproduction (the numbers in the reports)
+
+The models, the policy and the monitoring need the **full** dataset: the train, validation, test
+and production periods ([`configs/splits.yaml`](configs/splits.yaml)) only exist there.
+[`docs/reproducibility.md`](docs/reproducibility.md) has the step-by-step commands, the time of
+each step, what to expect, and the result of a reproduction from scratch in a clean clone.
+
+Two things to know:
+- **The test period has already been evaluated, once** (decision 022). In a fresh clone,
+  `fraud policy evaluate-test` refuses to run because the committed record exists; `--force`
+  exists but is not part of the reproduction.
+- **Give the database memory.** The feature build sorts 2.85M rows several times. On a 16 GB
+  laptop with other programs open, a second PostgreSQL instance in the same Docker VM made one
+  step stall for hours; alone, it took about 2 minutes.
 
 ## Real-time API
 
-`fraud serve api` starts the service. `POST /predict` takes a payment as the authorisation
-system sends it (before it reaches the database) and returns a calibrated probability, a risk
-level and the decision with the lowest expected cost for that amount:
+`fraud serve api` (or `docker compose up -d api`) starts the service. `POST /predict` takes a
+payment as the authorisation system sends it, before it reaches the database. It returns a
+calibrated probability, a risk level and the decision with the lowest expected cost for that
+amount:
 
 ```bash
 curl -s http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d '{
@@ -91,39 +105,75 @@ curl -s http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d '{
  "policy_version": "65a2111fa8c2", "scoring_timestamp": "2026-10-26T12:15:00.187080Z"}
 ```
 
-A 0.2% risk is "low", but on €8,598 a review is cheaper than the expected loss: the risk level
-is for display, the decision comes from the cost policy. The ids exist in the full simulated
-dataset. Invalid or unknown inputs get a 422; a retried `transaction_id` returns the decision
-already made. `GET /health` and `GET /model` (versions, policy, training period, lineage) are
-also available, and the interactive docs are at `/docs`.
+A 0.2% risk is "low", but on €8,598 a review is cheaper than the expected loss: the risk level is
+for display, the decision comes from the cost policy. (The ids exist in the full simulated
+dataset.)
+- Invalid or unknown inputs get a 422.
+- A retried `transaction_id` returns the decision already made.
+- `GET /health` and `GET /model` (versions, policy, training period, lineage) are also available.
+- Interactive docs: `/docs`.
 
-Measured on a laptop: ~49 ms per request one at a time (p50), ~100 requests/s with several
-processes; online features are identical, bit for bit, to the training features. Details:
-[serving findings](reports/serving/phase10_findings.md).
+## What is where
 
-## Pipeline so far
-
-| Step | Command | Where |
+| Area | Code | Results |
 |---|---|---|
-| Synthetic data | `fraud simulate` | `src/fraudplatform/simulation/`, `configs/simulation.yaml` |
-| Load raw extract | `fraud db load` | `sql/schema/` |
-| Data quality (47 rules) | `fraud dq run` | `sql/data_quality/`, `dq.rules`, `dq.violations` |
-| Analytical SQL | `psql -f` | `sql/analysis/` |
-| EDA + statistics (train period only) | `jupytext --to ipynb --execute notebooks/02_eda.py` | [`notebooks/02_eda.ipynb`](notebooks/02_eda.ipynb), [findings](reports/eda/eda_findings.md) |
-| Point-in-time features (50) | `fraud features build` | `sql/features/`, [catalog](docs/feature_catalog.md), [findings](reports/features/feature_findings.md) |
-| Baselines vs models | `fraud models compare` | `src/fraudplatform/models/`, [comparison](reports/models/phase6_comparison.md), [findings](reports/models/phase6_findings.md) |
-| Temporal CV, tuning, H7/H8 | `fraud models tune` | `models/validation.py`, `models/tuning.py`, [findings](reports/models/phase7_findings.md) |
-| Calibration, cost model, policy, test | `fraud policy optimise`, `fraud policy evaluate-test` | `src/fraudplatform/decision/`, [policy](reports/policy/policy_v1.json), [findings](reports/policy/phase8_findings.md) |
-| Error analysis, explanations, model card | `fraud analyse validation` | `src/fraudplatform/analysis/`, [findings](reports/analysis/phase9_findings.md), [model card](reports/model_card.md) |
-| Real-time API, batch scoring | `fraud serve api`, `fraud serve batch` | `src/fraudplatform/serving/`, `sql/features/online/`, [findings](reports/serving/phase10_findings.md) |
-| Docker images, CI end to end | `docker compose`, GitHub Actions | `Dockerfile`, `docker/`, `.github/workflows/ci.yml`, [findings](reports/deployment/phase11_findings.md) |
-| Monitoring: drift, delayed labels, alerts | `fraud monitor replay`, `fraud monitor report` | `src/fraudplatform/monitoring/`, `configs/monitoring.yaml`, [findings](reports/monitoring/phase12_findings.md), [report](reports/monitoring/monitoring_report.html) |
+| Simulator | [`simulation/`](src/fraudplatform/simulation), [`configs/simulation.yaml`](configs/simulation.yaml) | [dataset report](reports/simulation/v1.0.1-full.md) |
+| Data quality | [`sql/data_quality/`](sql/data_quality), [`quality/`](src/fraudplatform/quality) | [DQ report](reports/data_quality/dq_report.md) |
+| EDA (train period only) | [`notebooks/02_eda.py`](notebooks/02_eda.py), [`sql/analysis/`](sql/analysis) | [findings](reports/eda/eda_findings.md) |
+| Point-in-time features (50) | [`sql/features/`](sql/features), [`features/`](src/fraudplatform/features) | [catalogue](docs/feature_catalog.md), [findings](reports/features/feature_findings.md) |
+| Models, temporal validation | [`models/`](src/fraudplatform/models), [`configs/model.yaml`](configs/model.yaml) | [Phase 6](reports/models/phase6_findings.md), [Phase 7](reports/models/phase7_findings.md) |
+| Calibration, cost policy, the test | [`decision/`](src/fraudplatform/decision), [`configs/costs.yaml`](configs/costs.yaml) | [findings](reports/policy/phase8_findings.md), [test record](reports/policy/test_evaluation.json) |
+| Errors and explanations | [`analysis/`](src/fraudplatform/analysis) | [findings](reports/analysis/phase9_findings.md), [model card](reports/model_card.md) |
+| API and batch scoring | [`serving/`](src/fraudplatform/serving), [`sql/features/online/`](sql/features/online) | [findings](reports/serving/phase10_findings.md) |
+| Docker and CI | [`Dockerfile`](Dockerfile), [`docker-compose.yml`](docker-compose.yml), [`ci.yml`](.github/workflows/ci.yml) | [findings](reports/deployment/phase11_findings.md) |
+| Monitoring | [`monitoring/`](src/fraudplatform/monitoring), [`configs/monitoring.yaml`](configs/monitoring.yaml) | [findings](reports/monitoring/phase12_findings.md), [HTML report](reports/monitoring/monitoring_report.html) |
+
+Notebooks are kept as [jupytext](https://jupytext.readthedocs.io) scripts (`notebooks/*.py`) and
+executed into `.ipynb` so GitHub shows their outputs.
+
+## How it was built
+
+Phase by phase, one branch and one pull request each; every PR description is in
+[`docs/pull_requests/`](docs/pull_requests). Phase 1 was the [design](docs/phase1_design.md).
+
+| Phase | Pull request description |
+|---|---|
+| 2 · simulator and database | [PR-02](docs/pull_requests/PR-02-simulator-and-db.md) |
+| 3 · data quality and SQL | [PR-03](docs/pull_requests/PR-03-data-quality-sql.md) |
+| 4 · EDA and statistics | [PR-04](docs/pull_requests/PR-04-eda.md) |
+| 5 · temporal features | [PR-05](docs/pull_requests/PR-05-temporal-features.md) |
+| 6 · baselines and models | [PR-06](docs/pull_requests/PR-06-modeling.md) |
+| 7 · temporal validation and tuning | [PR-07](docs/pull_requests/PR-07-temporal-validation.md) |
+| 8 · cost, threshold, calibration | [PR-08](docs/pull_requests/PR-08-cost-threshold-calibration.md) |
+| 9 · error analysis | [PR-09](docs/pull_requests/PR-09-error-analysis.md) |
+| 10 · API and batch scoring | [PR-10](docs/pull_requests/PR-10-api-and-batch.md) |
+| 11 · Docker and CI | [PR-11](docs/pull_requests/PR-11-docker-ci.md) |
+| 12 · monitoring | [PR-12](docs/pull_requests/PR-12-monitoring.md) |
+| 13 · documentation | [PR-13](docs/pull_requests/PR-13-documentation.md) |
 
 ## Tests
 
 ```bash
-pytest                    # unit tests
-pytest -m integration     # needs `docker compose up -d db`
-pytest -m "integration or not integration" --cov=fraudplatform   # both, with coverage
+pip install -e ".[train,dev]"
+pytest                                   # unit tests
+docker compose up -d db
+pytest -m integration                    # against a throwaway database on the same server
+pytest -m "integration or not integration" --cov=fraudplatform
 ruff check . && ruff format --check .
 ```
+
+CI runs all of it on every pull request. It then builds both Docker images and tests them end to
+end.
+
+## Limitations
+
+- **Synthetic data:** one simulator, one seed, one drift scenario.
+- **No retraining was run:** the monitoring says when, not whether it helps.
+- **Measured on a laptop:** latency and timings come from a shared machine.
+- **Not hardened for exposure:** the API has no authentication.
+
+The full list is in the [final report](reports/final_report.md#13-limitations).
+
+## License
+
+[MIT](LICENSE).

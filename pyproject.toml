@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Transaction fraud detection and risk scoring platform"
 readme = "README.md"
 requires-python = ">=3.11"
+license = {text = "MIT"}
 # Base: simulation, data quality, features, serving (API + batch). This is what the `app`
 # Docker image installs. Modelling and analysis (phases 6-9) add the `train` extra.
 dependencies = [
