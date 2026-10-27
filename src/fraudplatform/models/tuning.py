@@ -86,7 +86,10 @@ def run_phase7(
     feature_cfg: FeatureConfig,
     splits: Splits,
     out_dir: Path,
+    n_jobs: int = 4,
 ) -> dict:
+    """n_jobs: parallel fits of the logistic regression grid. Each worker holds a copy of the
+    training frame, so it sets the memory needed; the results do not depend on it."""
     out_dir.mkdir(parents=True, exist_ok=True)
     cv_cfg, tuning, seed = cfg.cross_validation, cfg.tuning, cfg.random_state
     start = training_start(splits, feature_cfg)
@@ -167,7 +170,7 @@ def run_phase7(
         {f"model__{k}": v for k, v in tuning["logistic_regression"]["grid"].items()},
         scoring=tuning["scoring"],
         cv=tsplits,
-        n_jobs=4,
+        n_jobs=n_jobs,
         refit=True,
     ).fit(train[lin_cols], y)
     lr_table = _cv_table(lr_search)
