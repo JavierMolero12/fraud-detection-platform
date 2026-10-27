@@ -53,7 +53,7 @@ outside the repository.
   910 ms request. Fixed in this PR.
 - **The budget was chosen from warm-cache measurements.** A demo after a database restart got a
   503 on its first payment. Measured afterwards: the first lookup of an entity took 465–965 ms
-  for 3 of 12 payments, and 23–32 ms once cached. The budget works as designed; how often it
+  for 3 of 12 payments (2 of them over 500 ms), and 23–32 ms once cached. The budget works as designed; how often it
   fires with a cold cache, and what to do about it, is in finding 1.
 - **An existing test codifies a questionable contract:** a retry with a different amount
   silently gets the old decision. It is left as it is and listed as finding 6, because
