@@ -230,10 +230,13 @@ plt.show()
 #
 # Full write-up: [`reports/models/phase7_findings.md`](../reports/models/phase7_findings.md).
 #
-# - **H7 supported, modestly:** shuffled CV 0.816 vs temporal CV 0.797 vs out-of-time
-#   validation 0.790. The bigger lesson is the month-to-month spread (0.759 to 0.825).
-# - **Tuning is within noise:** best gradient boosting 0.803 in CV vs 0.797 default; on
-#   validation +0.002 (CI −0.004 to +0.008). 13 of 16 candidates sit between 0.795 and 0.803.
+# - **H7 supported, modestly:** shuffled CV 0.817 vs temporal CV 0.799 vs out-of-time
+#   validation 0.790. The bigger lesson is the month-to-month spread (0.768 to 0.822).
+# - **Tuning is within noise:** best gradient boosting 0.803 in CV vs 0.799 default; on
+#   validation +0.004 (CI −0.001 to +0.010). 13 of 16 candidates sit between 0.795 and 0.803.
 #   Kept as the selected model (chosen by CV), but the defaults were already near-optimal.
-# - **H8 supported, dramatically:** leaky features score 0.847 offline and 0.399 with the
+# - **H8 supported, dramatically:** leaky features score 0.852 offline and 0.401 with the
 #   values available in production, half as good as the honest model.
+#
+# Re-run in Phase 13 with a fixed row order; the original numbers are in section 5 of the
+# findings.
