@@ -16,3 +16,9 @@ risk_levels:
 # of reviewing. With the Phase 8 policy the capacity has not bound so far (busiest day: 24 of
 # 60 reviews on validation, 41 of 60 in the production batch), so both give the same decisions.
 log_features: true
+
+# Time budget of each database statement of the API, in ms. An authorisation cannot wait for a
+# slow query: past the budget the API answers 503 and the authorisation system applies its
+# fallback rule. Measured server-side p99: 66 ms in Docker, 173 ms natively; the feature query's
+# p95 is 33 ms (reports/serving/, reports/deployment/).
+statement_timeout_ms: 500

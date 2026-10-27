@@ -5,7 +5,9 @@ GET  /health    liveness + database reachability + model loaded
 GET  /model     what is deployed: versions, policy, calibration, training period, lineage
 
 Run with `fraud serve api` (uvicorn). Endpoints are plain `def`: FastAPI runs them in its
-thread pool, and each request takes its own connection from a psycopg pool.
+thread pool, and each request takes its own connection from a psycopg pool. Every statement on
+those connections has a time budget (serving.yaml): past it, /predict answers 503 instead of
+holding the authorisation.
 """
 
 from __future__ import annotations
@@ -119,7 +121,10 @@ def create_app(
             db_url or database_url(),
             min_size=1,
             max_size=pool_size,
-            kwargs={"autocommit": True},
+            kwargs={
+                "autocommit": True,
+                "options": f"-c statement_timeout={serving.statement_timeout_ms}",
+            },
             timeout=5,
             open=True,
         )
@@ -146,6 +151,9 @@ def create_app(
                 )
         except UnknownEntity as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except psycopg.errors.QueryCanceled as exc:
+            log.warning("scoring %s exceeded the time budget", payment.transaction_id)
+            raise HTTPException(status_code=503, detail="scoring exceeded its time budget") from exc
         except (psycopg.OperationalError, PoolTimeout) as exc:
             log.exception("database unavailable")
             raise HTTPException(status_code=503, detail="database unavailable") from exc
