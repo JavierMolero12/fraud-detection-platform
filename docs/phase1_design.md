@@ -1,273 +1,273 @@
-# Fase 1 — Diseño técnico
+# Phase 1 — Technical design
 
-**Proyecto:** Transaction Fraud Detection & Risk Scoring Platform
-**Estado:** borrador para validación (no hay código ni resultados todavía)
-**Fecha:** 2026-10-20
+**Project:** Transaction Fraud Detection & Risk Scoring Platform
+**Status:** the design validated before any code was written (2026-10-20), kept as the original
+plan. What changed while building it is listed in [`architecture.md`](architecture.md#deviations-from-the-phase-1-design).
+**Language:** translated from the Spanish original in Phase 13; the content is unchanged.
 
-> Regla de honestidad: este documento **no contiene ningún resultado**. Todo número que aparece
-> es un **supuesto de diseño** (marcado como tal) o un **objetivo** a verificar empíricamente.
+> Honesty rule: this document contains **no results**. Every number in it is either a **design
+> assumption** (marked as such) or a **target** to be verified empirically.
 
 ---
 
-## 0. Resumen de decisiones
+## 0. Summary of decisions
 
-| Tema | Decisión | Por qué (en una línea) |
+| Topic | Decision | Why (one line) |
 |---|---|---|
-| Datos | Simulador sintético por **escenarios de fraude**, ~3M transacciones, 24 meses, fraude ~1% | Ningún dataset público tiene customers + cards + merchants + devices + tiempo real |
-| Etiquetas | Tabla separada `fraud_labels` con **`reported_at`** (las etiquetas llegan con retraso) | Así funciona el fraude real (chargebacks); es la fuente de leakage más sutil |
-| Base de datos | PostgreSQL 16 en Docker, esquemas `raw` → `core` → `features` → `scoring` → `monitoring` | Window functions con `RANGE INTERVAL`, constraints reales, gratis y estándar |
-| Features | Definidas en **SQL point-in-time** (solo historia estrictamente anterior), mismas definiciones offline y online | Evita leakage y training/serving skew; un test de paridad lo verifica |
-| Validación | Train 12m → Validation 3m → Test 3m → **Producción simulada 6m con drift** | Validación temporal + un periodo "seis meses después" real para monitoring |
-| Métrica de modelo | PR-AUC (Average Precision) | Con 1% de fraude, accuracy y ROC-AUC engañan |
-| Métrica de negocio | Coste esperado en € **dependiente del importe** + **capacidad de revisión limitada** | Dejar pasar un fraude de 3 € no cuesta lo mismo que uno de 2.000 € |
-| Decisión | approve / review / block optimizados por coste, no thresholds fijos | El threshold 0.5 no tiene sentido con base rate del 1% |
-| Tracking | MLflow local | Comparar experimentos con dataset/feature/model version |
-| Fuera de alcance | Kafka, Airflow, Spark, Kubernetes, feature store, cloud | No resuelven un problema que tengamos a esta escala |
+| Data | Own synthetic simulator built on **fraud scenarios**, ~3M transactions, 24 months, ~1% fraud | No public dataset has customers + cards + merchants + devices + real time |
+| Labels | Separate `fraud_labels` table with **`reported_at`** (labels arrive late) | That is how real fraud works (chargebacks); it is the subtlest source of leakage |
+| Database | PostgreSQL 16 in Docker, schemas `raw` → `core` → `features` → `scoring` → `monitoring` | Window functions with `RANGE INTERVAL`, real constraints, free and standard |
+| Features | Defined in **point-in-time SQL** (strictly earlier history only), same definitions offline and online | Prevents leakage and training/serving skew; a parity test checks it |
+| Validation | Train 12m → Validation 3m → Test 3m → **Simulated production 6m with drift** | Temporal validation, plus a real "six months later" period for monitoring |
+| Model metric | PR-AUC (Average Precision) | With 1% fraud, accuracy and ROC-AUC mislead |
+| Business metric | Expected cost in € **depending on the amount** + **limited review capacity** | Letting a €3 fraud through does not cost the same as a €2,000 one |
+| Decision | approve / review / block optimised on cost, not fixed thresholds | A 0.5 threshold makes no sense with a 1% base rate |
+| Tracking | Local MLflow | Compare experiments by dataset / feature / model version |
+| Out of scope | Kafka, Airflow, Spark, Kubernetes, feature store, cloud | They solve no problem we have at this scale |
 
 ---
 
-## 1. Problema de negocio
+## 1. Business problem
 
-### 1.1 Contexto
-Una fintech europea (ficticia) emite tarjetas y procesa sus pagos. Cada transacción pasa por un
-motor de autorización que debe decidir en el momento:
+### 1.1 Context
+A (fictitious) European fintech issues cards and processes their payments. Every transaction
+goes through an authorisation engine that must decide on the spot:
 
-| Decisión | Qué significa operativamente |
+| Decision | What it means operationally |
 |---|---|
-| `approve` | Se autoriza sin fricción |
-| `review` | Se retiene: autenticación reforzada (OTP/3DS) o cola de analista antes de liquidar |
-| `block` | Se deniega |
+| `approve` | Authorised without friction |
+| `review` | Held: step-up authentication (OTP/3DS) or an analyst queue before settlement |
+| `block` | Declined |
 
-> Nota de realismo: en un pago con tarjeta física no puedes "esperar a un analista" con el cliente
-> en la caja. Por eso definimos `review` como *step-up authentication o retención previa a
-> liquidación*. Lo documentamos como supuesto en vez de fingir que la revisión manual es instantánea.
+> Realism note: for a card-present payment you cannot "wait for an analyst" with the customer at
+> the till. That is why `review` is defined as *step-up authentication or a hold before
+> settlement*. It is documented as an assumption instead of pretending manual review is instant.
 
-### 1.2 Pregunta que responde el sistema
-> "Dada esta transacción y **toda la información disponible hasta ese instante**,
-> ¿cuál es la probabilidad de que acabe confirmada como fraude?"
+### 1.2 The question the system answers
+> "Given this transaction and **all the information available up to this instant**, what is the
+> probability that it ends up confirmed as fraud?"
 
-- **Unidad de predicción:** una transacción en el momento de autorización.
-- **Target:** `is_fraud = 1` si la transacción es confirmada como fraude (chargeback, denuncia del
-  cliente o investigación) dentro de una **ventana de maduración de 120 días**.
-- **Salida:** `fraud_probability ∈ [0,1]` **calibrada** + `risk_level` + `decision`.
+- **Unit of prediction:** one transaction at authorisation time.
+- **Target:** `is_fraud = 1` if the transaction is confirmed as fraud (chargeback, customer
+  claim or investigation) within a **120-day maturation window**.
+- **Output:** a **calibrated** `fraud_probability ∈ [0,1]` + `risk_level` + `decision`.
 
-### 1.3 Objetivo
-Minimizar el **coste total esperado** (fraude no detectado + clientes legítimos bloqueados +
-coste de revisiones), **sujeto a una capacidad de revisión diaria limitada**. No maximizar accuracy.
+### 1.3 Objective
+Minimise the **total expected cost** (undetected fraud + legitimate customers blocked + review
+cost), **subject to a limited daily review capacity**. Not maximise accuracy.
 
-### 1.4 Usuarios del sistema
-| Usuario | Cómo lo usa |
+### 1.4 Users of the system
+| User | How they use it |
 |---|---|
-| Motor de autorización | `POST /predict` síncrono |
-| Equipo de Fraud Ops | Cola de `review` ordenada por riesgo |
-| Risk analysts | Scoring batch diario, reportes de monitoring |
-| Model owner (tú) | MLflow, model card, alertas de drift |
+| Authorisation engine | Synchronous `POST /predict` |
+| Fraud Ops team | `review` queue ordered by risk |
+| Risk analysts | Daily batch scoring, monitoring reports |
+| Model owner | MLflow, model card, drift alerts |
 
-### 1.5 Qué significa "real-time" en este proyecto (honestidad de alcance)
-API síncrona que calcula features consultando la historia en PostgreSQL y responde en una sola
-petición. **No** construimos infraestructura de streaming. Mediremos la latencia (p50/p95) en lugar
-de prometerla.
+### 1.5 What "real time" means in this project (honest scope)
+A synchronous API that computes features by querying the history in PostgreSQL and answers in a
+single request. **No** streaming infrastructure is built. Latency (p50/p95) is measured, not
+promised.
 
 ---
 
-## 2. Arquitectura
+## 2. Architecture
 
-### 2.1 Diagrama de componentes
+### 2.1 Component diagram
 
 ```mermaid
 flowchart TD
-    SIM["Simulador sintético<br/>(Python, seed fija)"] -->|CSV/Parquet + defectos DQ inyectados| RAW[("PostgreSQL · raw<br/>sin constraints")]
-    RAW --> DQ["Data Quality<br/>reglas SQL + reporte"]
-    DQ -->|filas válidas| CORE[("PostgreSQL · core<br/>PK, FK, CHECK, índices")]
-    DQ -->|filas rechazadas| QUAR[("raw.quarantine")]
-    CORE --> FEAT["Features point-in-time<br/>(SQL window functions)"]
+    SIM["Synthetic simulator<br/>(Python, fixed seed)"] -->|CSV/Parquet + injected DQ defects| RAW[("PostgreSQL · raw<br/>no constraints")]
+    RAW --> DQ["Data quality<br/>SQL rules + report"]
+    DQ -->|valid rows| CORE[("PostgreSQL · core<br/>PK, FK, CHECK, indexes")]
+    DQ -->|rejected rows| QUAR[("raw.quarantine")]
+    CORE --> FEAT["Point-in-time features<br/>(SQL window functions)"]
     FEAT --> FT[("features.transaction_features")]
-    FT --> ML["ML pipeline<br/>sklearn · validación temporal"]
-    ML --> MLF[("MLflow<br/>params · métricas · modelos")]
-    ML --> POL["Calibración + política de decisión<br/>(thresholds por coste)"]
-    POL --> ART["Artefacto versionado<br/>model_version + policy_version"]
+    FT --> ML["ML pipeline<br/>sklearn · temporal validation"]
+    ML --> MLF[("MLflow<br/>params · metrics · models")]
+    ML --> POL["Calibration + decision policy<br/>(cost-based thresholds)"]
+    POL --> ART["Versioned artefact<br/>model_version + policy_version"]
     ART --> API["FastAPI<br/>POST /predict"]
     ART --> BATCH["Batch scoring CLI"]
-    CORE -->|historia previa a ts| API
+    CORE -->|history before ts| API
     FT --> BATCH
     API --> PRED[("scoring.predictions")]
     BATCH --> PRED
-    PRED --> MON["Monitoring<br/>PSI · KS · score drift · performance diferida"]
-    CORE -->|labels maduras| MON
-    MON --> REP["Reporte HTML + reglas de retraining"]
+    PRED --> MON["Monitoring<br/>PSI · KS · score drift · delayed performance"]
+    CORE -->|mature labels| MON
+    MON --> REP["HTML report + retraining rules"]
 ```
 
-### 2.2 Decisiones de arquitectura clave
+### 2.2 Key architecture decisions
 
-1. **Capas raw → core.** `raw` acepta cualquier cosa (texto, sin FK) porque los datos reales llegan
-   sucios; si `raw` tuviera constraints, los datos inválidos ni siquiera se podrían cargar para
-   detectarlos. `core` tiene todas las garantías. Lo rechazado va a cuarentena con el motivo.
-2. **Una sola definición de cada feature.** La lógica point-in-time vive en SQL. Offline se aplica
-   a toda la tabla; online (API) se aplica a una sola transacción contra la historia. Un **test de
-   paridad** comprueba que ambas rutas dan el mismo valor para una muestra de transacciones.
-3. **Modelo y política separados.** El modelo devuelve P(fraude). La política (thresholds) depende
-   de supuestos de coste que negocio puede cambiar sin reentrenar → se versionan por separado.
-4. **Orquestación con una CLI** (`fraud simulate | load | dq | features | train | score | monitor`),
-   no con Airflow: el pipeline es lineal y se ejecuta en un portátil.
+1. **Layers raw → core.** `raw` accepts anything (text, no FK) because real data arrives dirty: if
+   `raw` had constraints, invalid data could not even be loaded to be detected. `core` has every
+   guarantee. Rejected rows go to quarantine with the reason.
+2. **One definition per feature.** The point-in-time logic lives in SQL. Offline it is applied to
+   the whole table; online (API) to a single transaction against the history. A **parity test**
+   checks that both paths give the same value for a sample of transactions.
+3. **Model and policy kept apart.** The model returns P(fraud). The policy (thresholds) depends on
+   cost assumptions the business can change without retraining, so they are versioned separately.
+4. **Orchestration with a CLI** (`fraud simulate | load | dq | features | train | score |
+   monitor`), not Airflow: the pipeline is linear and runs on a laptop.
 
-### 2.3 Estructura del repositorio (cambios respecto a la propuesta)
+### 2.3 Repository layout (changes from the proposal)
 
 ```
 fraud-detection-platform/
 ├── README.md · LICENSE · pyproject.toml · Dockerfile · docker-compose.yml
 ├── configs/
-│   ├── simulation.yaml        # escala, seed, mezcla de escenarios, drift
-│   ├── features.yaml          # ventanas, versión del feature set
-│   ├── costs.yaml             # SUPUESTOS de coste (documentados)
-│   └── model.yaml             # espacios de búsqueda, splits
-├── data/{raw,processed,sample}/   # ignorado en git salvo sample/
+│   ├── simulation.yaml        # scale, seed, scenario mix, drift
+│   ├── features.yaml          # windows, feature set version
+│   ├── costs.yaml             # cost ASSUMPTIONS (documented)
+│   └── model.yaml             # search spaces, splits
+├── data/{raw,processed,sample}/   # ignored by git except sample/
 ├── sql/
 │   ├── schema/                # 01_raw.sql, 02_core.sql, 03_features.sql, ...
-│   ├── data_quality/          # una regla por fichero o bloque
+│   ├── data_quality/          # one rule per file or block
 │   ├── features/              # velocity, device, geo, history
-│   └── analysis/              # consultas analíticas del EDA
-├── notebooks/                 # 01_data_quality … 05_error_analysis (solo análisis)
-├── src/fraudplatform/         # paquete instalable (src-layout)
+│   └── analysis/              # analytical EDA queries
+├── notebooks/                 # 01_data_quality … 05_error_analysis (analysis only)
+├── src/fraudplatform/         # installable package (src layout)
 │   ├── config.py · cli.py · db.py · logging.py
 │   ├── simulation/  data/  quality/  features/
 │   ├── models/  decision/  scoring/  monitoring/
 │   └── api/                   # main.py, schemas.py
 ├── tests/{unit,integration}/
-├── reports/                   # model_card.md, final_report.md, figuras
+├── reports/                   # model_card.md, final_report.md, figures
 ├── docs/                      # phase1_design.md, decisions.md, architecture.md
 └── .github/workflows/ci.yml · .github/pull_request_template.md
 ```
 
-Cambios y motivo:
-- `api/` y `monitoring/` **dentro del paquete** `src/fraudplatform/`: evita hacks de `sys.path` y
-  duplicar un `monitoring/` fuera y otro dentro de `src/`.
-- **src-layout con nombre de paquete** (`fraudplatform`), no `src.data...`: los imports funcionan
-  igual en tests, Docker y CLI.
-- `configs/` separado: los supuestos de coste y simulación son decisiones de negocio, no código.
-- Los notebooks **importan** del paquete; no contienen lógica que la API o el batch necesiten.
+Changes and why:
+- `api/` and `monitoring/` **inside the package** `src/fraudplatform/`: avoids `sys.path` hacks
+  and having one `monitoring/` outside `src/` and another inside.
+- **src layout with a package name** (`fraudplatform`), not `src.data...`: imports work the same
+  in tests, Docker and the CLI.
+- Separate `configs/`: cost and simulation assumptions are business decisions, not code.
+- Notebooks **import** from the package; they hold no logic the API or the batch job needs.
 
 ---
 
 ## 3. Dataset
 
-### 3.1 ¿Hay un dataset público adecuado?
+### 3.1 Is there a suitable public dataset?
 
-| Dataset | A favor | Por qué no sirve como fuente principal |
+| Dataset | For | Why it does not work as the main source |
 |---|---|---|
-| ULB Credit Card Fraud (Kaggle, 284k, 2 días) | Real | Features PCA anónimas (V1–V28), solo 2 días, sin entidades: imposible SQL relacional o velocity |
-| IEEE-CIS Fraud Detection (Vesta) | Real y rico | Tiempo relativo, sin `customer_id` (hay que inferirlo), cientos de columnas sin semántica, licencia de competición que impide redistribuirlo en el repo |
-| PaySim | Temporal | Mobile money: sin merchants, cards ni devices; el fraude se deduce casi directamente de los campos de saldo |
-| Sparkov ("Credit Card Transactions Fraud Detection", Kaggle) | Customers, merchants, categorías, fechas reales | Sin devices ni payment method, un solo país |
-| IBM TabFormer | Grande, users/cards/merchants | Sin devices, casi todo en un país, muy pesado |
+| ULB Credit Card Fraud (Kaggle, 284k, 2 days) | Real | Anonymous PCA features (V1–V28), only 2 days, no entities: relational SQL or velocity are impossible |
+| IEEE-CIS Fraud Detection (Vesta) | Real and rich | Relative time, no `customer_id` (it must be inferred), hundreds of columns without semantics, competition licence that forbids redistributing it in the repo |
+| PaySim | Temporal | Mobile money: no merchants, cards or devices; fraud follows almost directly from the balance fields |
+| Sparkov ("Credit Card Transactions Fraud Detection", Kaggle) | Customers, merchants, categories, real dates | No devices or payment method, a single country |
+| IBM TabFormer | Large, users/cards/merchants | No devices, almost everything in one country, very heavy |
 
-**Decisión:** simulador sintético propio como fuente principal (ADR-002).
-**Opcional (Fase 7):** aplicar la misma metodología a Sparkov como *sanity check externo* sobre
-datos que no hemos diseñado nosotros.
+**Decision:** our own synthetic simulator as the main source (ADR-002).
+**Optional (Phase 7):** apply the same methodology to Sparkov as an *external sanity check* on data
+we did not design.
 
-### 3.2 El riesgo de un dataset sintético (y cómo lo gestionamos)
-Si yo diseño el generador, el modelo puede acabar aprendiendo **mis propias reglas** — es circular.
-Un entrevistador lo preguntará. Mitigaciones:
+### 3.2 The risk of a synthetic dataset (and how it is handled)
+If I design the generator, the model may end up learning **my own rules**: it is circular. An
+interviewer will ask. Mitigations:
 
-1. El fraude se genera por **escenarios de comportamiento** (mecanismos latentes), no por una
-   fórmula sobre las columnas. Las features no son los inputs del generador.
-2. **Ruido deliberado:** comportamiento legítimo que parece fraude (viajes, móvil nuevo, dispositivos
-   compartidos en familia) y fraude que parece legítimo (escenario *stealth*).
-3. **Ruido en las etiquetas:** fraude que nunca se reporta y disputas falsas (*friendly fraud*).
-4. **Congelar el generador** (`simulation_version = 1.0`) **antes** de modelar. Cambiarlo después
-   para "mejorar resultados" está prohibido; cualquier cambio sube versión y se documenta el motivo.
-5. Lo que **sí** demuestra el proyecto: metodología (leakage, validación temporal, coste,
-   calibración, drift), no que hayamos descubierto patrones de fraude reales.
+1. Fraud is generated through **behavioural scenarios** (latent mechanisms), not through a formula
+   on the columns. The features are not the generator's inputs.
+2. **Deliberate noise:** legitimate behaviour that looks like fraud (travel, a new phone, devices
+   shared in a family) and fraud that looks legitimate (the *stealth* scenario).
+3. **Label noise:** fraud that is never reported and false disputes (*friendly fraud*).
+4. **Freeze the generator** (`simulation_version = 1.0`) **before** modelling. Changing it later
+   "to improve results" is forbidden; any change bumps the version and documents why.
+5. What the project **does** demonstrate: methodology (leakage, temporal validation, cost,
+   calibration, drift), not that we discovered real fraud patterns.
 
-### 3.3 Escala (configurable)
+### 3.3 Scale (configurable)
 
-| Parámetro | `full` (objetivo) | `small` (dev/CI) |
+| Parameter | `full` (target) | `small` (dev/CI) |
 |---|---|---|
-| Periodo | 2024-07-01 → 2026-06-30 (24 meses) | 3 meses |
-| Customers | ~30.000 | ~1.000 |
-| Cards | ~45.000 | ~1.500 |
-| Merchants | ~4.000 | ~300 |
-| Devices | ~50.000 | ~1.500 |
-| Transacciones | ~3M (objetivo, a verificar) | ~50k |
-| Tasa de fraude | objetivo 0,7%–1,2% (a verificar empíricamente) | similar |
+| Period | 2024-07-01 → 2026-06-30 (24 months) | 3 months |
+| Customers | ~30,000 | ~1,000 |
+| Cards | ~45,000 | ~1,500 |
+| Merchants | ~4,000 | ~300 |
+| Devices | ~50,000 | ~1,500 |
+| Transactions | ~3M (target, to verify) | ~50k |
+| Fraud rate | target 0.7%–1.2% (to verify empirically) | similar |
 
-Máquina disponible: 16 GB RAM, 20 hilos — suficiente para `full`.
+Available machine: 16 GB RAM, 20 threads — enough for `full`.
 
-### 3.4 Tablas de referencia
-- `countries`: ~12 países ISO (ES como mercado principal + UE + algunos extra-UE), con región,
-  divisa, **centroide lat/lon** y desfase UTC fijo.
-  El *risk tier* por país es un **parámetro sintético de configuración, no una afirmación sobre
-  países reales**. El principal mecanismo geográfico de riesgo es el **desajuste** (cross-border,
-  viaje imposible), no la nacionalidad.
-- `currencies` y `fx_rates` diarios (sintéticos) → `amount_eur` con el tipo de cambio de ese día.
+### 3.4 Reference tables
+- `countries`: ~12 ISO countries (ES as the main market + EU + some non-EU), with region, currency,
+  **centroid lat/lon** and a fixed UTC offset. The per-country *risk tier* is a **synthetic
+  configuration parameter, not a claim about real countries**. The main geographic risk mechanism
+  is the **mismatch** (cross-border, impossible travel), not nationality.
+- `currencies` and daily (synthetic) `fx_rates` → `amount_eur` with that day's exchange rate.
 
-### 3.5 Comportamiento legítimo (cómo se genera)
-| Elemento | Modelo generativo |
+### 3.5 Legitimate behaviour (how it is generated)
+| Element | Generative model |
 |---|---|
-| Actividad | Proceso de Poisson no homogéneo por cliente: tasa base por segmento × curva horaria × día de semana × efecto día de cobro |
-| Merchants | Conjunto preferido por cliente con distribución tipo Zipf (unos pocos merchants concentran el gasto) |
-| Importe | Lognormal por categoría × multiplicador de segmento × multiplicador individual |
-| Viajes | ~2–3% de clientes/mes viajan 3–14 días → transacciones legítimas en otro país (**generan falsos positivos realistas**) |
-| Devices | 1–2 por cliente; cambio de móvil legítimo ~1 vez/año; dispositivos compartidos en familia |
-| Altas | Clientes y tarjetas nuevos durante todo el periodo (cold start real) |
-| Payment method | `chip_pin`, `contactless` (presencial, **sin device**), `ecommerce`, `mobile_wallet` (con device) |
+| Activity | Non-homogeneous Poisson process per customer: base rate per segment × hourly curve × day of week × payday effect |
+| Merchants | A preferred set per customer with a Zipf-like distribution (a few merchants concentrate the spend) |
+| Amount | Lognormal per category × segment multiplier × individual multiplier |
+| Travel | ~2–3% of customers per month travel for 3–14 days → legitimate transactions in another country (**they create realistic false positives**) |
+| Devices | 1–2 per customer; a legitimate phone change about once a year; devices shared in a family |
+| Sign-ups | New customers and cards throughout the period (real cold start) |
+| Payment method | `chip_pin`, `contactless` (card present, **no device**), `ecommerce`, `mobile_wallet` (with device) |
 
-### 3.6 Escenarios de fraude
+### 3.6 Fraud scenarios
 
-| # | Escenario | Mecanismo | Señal esperada | Peso aprox. (supuesto) |
+| # | Scenario | Mechanism | Expected signal | Approx. weight (assumption) |
 |---|---|---|---|---|
-| F1 | Card testing | Ráfaga de 3–10 micro-pagos (0,5–5 €) en minutos en merchants digitales y luego 1–3 compras grandes | velocity, importes pequeños repetidos | 25% |
-| F2 | Account takeover | Device nuevo (a veces otro país/OS) → varias compras caras (electrónica, gift cards) en horas | new_device, amount ratio, categoría | 25% |
-| F3 | Tarjeta clonada presencial | Pagos presenciales en otro país mientras el cliente acaba de pagar en casa | viaje imposible, country change | 15% |
-| F4 | Fraud ring / granja de devices | Pocos devices usados con muchas tarjetas robadas de clientes distintos | cards/customers por device | 15% |
-| F5 | Merchant comprometido | Tarjetas usadas en un merchant comprometido sufren fraude 1–6 semanas después | difícil sin labels históricas → trampa de leakage | 10% |
-| F6 | Stealth | Importe, merchant y device coherentes con el perfil del cliente | casi ninguna → **suelo de error irreducible** | 10% |
+| F1 | Card testing | A burst of 3–10 micro-payments (€0.5–5) within minutes at digital merchants, then 1–3 large purchases | velocity, repeated small amounts | 25% |
+| F2 | Account takeover | New device (sometimes another country/OS) → several expensive purchases (electronics, gift cards) within hours | new_device, amount ratio, category | 25% |
+| F3 | Cloned card, card present | Card-present payments in another country while the customer has just paid at home | impossible travel, country change | 15% |
+| F4 | Fraud ring / device farm | A few devices used with many stolen cards of different customers | cards/customers per device | 15% |
+| F5 | Compromised merchant | Cards used at a compromised merchant suffer fraud 1–6 weeks later | hard without historical labels → leakage trap | 10% |
+| F6 | Stealth | Amount, merchant and device consistent with the customer's profile | almost none → **irreducible error floor** | 10% |
 
-**Ruido de etiquetas (supuestos):** ~5–10% del fraude nunca se reporta; ~0,05% de transacciones
-legítimas se disputan como fraude.
-**Retraso de etiquetas:** `reported_at = ts + delay`, lognormal (mediana ~3 semanas, máx. 120 días);
-el card testing se detecta antes.
+**Label noise (assumptions):** ~5–10% of fraud is never reported; ~0.05% of legitimate
+transactions are disputed as fraud.
+**Label delay:** `reported_at = ts + delay`, lognormal (median ~3 weeks, max 120 days); card
+testing is detected sooner.
 
-**Drift inyectado (solo en producción simulada, desde 2026-03-01), documentado:**
-- Nuevo patrón de fraude: aprovisionamiento de tarjetas en `mobile_wallet` desde devices recién vistos.
-- Cambio legítimo: más peso del canal online y subida de importes (~inflación).
+**Injected drift (simulated production only, from 2026-03-01), documented:**
+- A new fraud pattern: card provisioning in `mobile_wallet` from newly seen devices.
+- A legitimate change: more weight of the online channel and higher amounts (~inflation).
 
-El objetivo de monitoring es **detectar esto sin mirar el generador**.
+The goal of monitoring is to **detect this without looking at the generator**.
 
-### 3.7 Defectos de calidad inyectados (solo en `raw`)
-Como sabemos exactamente qué filas son defectuosas, podremos medir el **recall de nuestras reglas
-de DQ** — algo que en la vida real no se puede hacer.
+### 3.7 Injected data quality defects (in `raw` only)
+Since we know exactly which rows are defective, we can measure the **recall of our DQ rules** —
+something impossible in real life.
 
-| Defecto | Tasa (supuesto) |
+| Defect | Rate (assumption) |
 |---|---|
-| Duplicados exactos (reintentos) | 0,2% |
-| `transaction_id` repetido con contenido distinto | 0,02% |
-| Importe ≤ 0 o nulo | 0,05% |
-| Divisa inválida (`XXX`, `EURO`, minúsculas) | 0,05% |
-| Timestamp futuro o anterior a la emisión de la tarjeta | 0,03% |
-| FK rota (customer/merchant inexistente, tarjeta de otro cliente) | 0,03% |
-| País de transacción presencial ≠ país del merchant | 0,05% |
-| Device "centinela" (`unknown`, `000000`) compartido por miles de clientes | patrón realista |
+| Exact duplicates (retries) | 0.2% |
+| Repeated `transaction_id` with different content | 0.02% |
+| Amount ≤ 0 or null | 0.05% |
+| Invalid currency (`XXX`, `EURO`, lower case) | 0.05% |
+| Timestamp in the future or before the card was issued | 0.03% |
+| Broken FK (non-existent customer/merchant, card of another customer) | 0.03% |
+| Card-present transaction country ≠ merchant country | 0.05% |
+| "Sentinel" device (`unknown`, `000000`) shared by thousands of customers | realistic pattern |
 
-### 3.8 Ground truth del simulador
-El escenario que generó cada fraude se guarda en un esquema aparte `sim.ground_truth`. **Los
-modelos y las features nunca lo leen** (un test lo verifica). Solo se usa en error analysis
-("¿qué tipo de fraude se nos escapa?"), una ventaja honesta de tener datos sintéticos.
+### 3.8 The simulator's ground truth
+The scenario that generated each fraud is stored in a separate schema `sim.ground_truth`. **Models
+and features never read it** (a test checks this). It is only used in error analysis ("which kind
+of fraud do we miss?"), an honest advantage of synthetic data.
 
 ---
 
-## 4. Esquema de base de datos
+## 4. Database schema
 
-### 4.1 Esquemas PostgreSQL
-| Esquema | Contenido |
+### 4.1 PostgreSQL schemas
+| Schema | Content |
 |---|---|
-| `raw` | Copia fiel de los ficheros: tipos `text`, sin constraints + `raw.quarantine` |
-| `core` | Modelo limpio con PK, FK, CHECK, índices |
-| `features` | Tabla de features materializada, versionada |
-| `scoring` | Predicciones (API y batch) |
-| `monitoring` | Métricas de drift y rendimiento por ventana |
-| `sim` | Ground truth del simulador (fuera del alcance de los modelos) |
+| `raw` | Faithful copy of the files: `text` types, no constraints + `raw.quarantine` |
+| `core` | Clean model with PK, FK, CHECK, indexes |
+| `features` | Materialised, versioned feature table |
+| `scoring` | Predictions (API and batch) |
+| `monitoring` | Drift and performance metrics per window |
+| `sim` | The simulator's ground truth (out of the models' reach) |
 
-### 4.2 Diagrama entidad-relación (`core`)
+### 4.2 Entity-relationship diagram (`core`)
 
 ```mermaid
 erDiagram
@@ -360,21 +360,21 @@ erDiagram
     }
 ```
 
-### 4.3 Cambios respecto al esquema propuesto (y por qué)
+### 4.3 Changes from the proposed schema (and why)
 
-| Propuesta original | Cambio | Motivo |
+| Original proposal | Change | Reason |
 |---|---|---|
-| `customers.age` | `date_of_birth` | La edad cambia con el tiempo; una columna `age` estática da la edad *de hoy*, no la del momento de la transacción |
-| `transactions.is_fraud` | Tabla `fraud_labels(is_fraud, reported_at, label_source)` | La etiqueta no existe en el momento de la transacción; llega semanas después. Sin `reported_at` es imposible construir features históricas de fraude sin leakage |
-| `transactions.device_id` obligatorio | Nullable, solo en `ecommerce`/`mobile_wallet` | En un pago presencial no hay device del cliente. La regla de DQ debe distinguir "nulo legítimo" de "nulo erróneo" |
-| `transactions.country` (ambiguo) | Definido: país donde se origina (terminal en presencial, geolocalización IP en online) | Sin definición, `merchant_country_mismatch` no significa nada |
-| `devices.country` | `country_code` = país del **primer** uso + `first_seen_at` | Si fuera "último país visto" se actualizaría con el tiempo → leakage (dimensión mutable) |
-| — | `amount_eur`, `fx_rates` | Comparar importes en divisas distintas |
+| `customers.age` | `date_of_birth` | Age changes over time; a static `age` column gives *today's* age, not the age at the transaction |
+| `transactions.is_fraud` | Table `fraud_labels(is_fraud, reported_at, label_source)` | The label does not exist at transaction time; it arrives weeks later. Without `reported_at`, historical fraud features cannot be built without leakage |
+| Mandatory `transactions.device_id` | Nullable, only for `ecommerce`/`mobile_wallet` | A card-present payment has no customer device. The DQ rule must tell a "legitimate null" from an "erroneous null" |
+| `transactions.country` (ambiguous) | Defined: the country where the payment originates (terminal for card present, IP geolocation online) | Without a definition, `merchant_country_mismatch` means nothing |
+| `devices.country` | `country_code` = country of **first** use + `first_seen_at` | If it were the "last country seen" it would change over time → leakage (mutable dimension) |
+| — | `amount_eur`, `fx_rates` | To compare amounts in different currencies |
 
-### 4.4 Constraints e índices
+### 4.4 Constraints and indexes
 
 ```sql
--- La tarjeta debe pertenecer al cliente de la transacción (FK compuesta)
+-- The card must belong to the transaction's customer (composite FK)
 ALTER TABLE core.cards ADD CONSTRAINT uq_card_customer UNIQUE (card_id, customer_id);
 ALTER TABLE core.transactions
   ADD CONSTRAINT fk_txn_card_customer
@@ -384,191 +384,193 @@ ALTER TABLE core.transactions ADD CONSTRAINT ck_amount_positive CHECK (amount > 
 ALTER TABLE core.transactions ADD CONSTRAINT ck_device_channel
   CHECK (device_id IS NOT NULL OR payment_method IN ('chip_pin', 'contactless'));
 
--- Índices pensados para las features point-in-time (entidad, tiempo)
+-- Indexes designed for point-in-time features (entity, time)
 CREATE INDEX ix_txn_card_ts     ON core.transactions (card_id, ts);
 CREATE INDEX ix_txn_customer_ts ON core.transactions (customer_id, ts);
 CREATE INDEX ix_txn_device_ts   ON core.transactions (device_id, ts) WHERE device_id IS NOT NULL;
 CREATE INDEX ix_txn_merchant_ts ON core.transactions (merchant_id, ts);
-CREATE INDEX brin_txn_ts        ON core.transactions USING brin (ts);   -- escaneos por rango de fechas
+CREATE INDEX brin_txn_ts        ON core.transactions USING brin (ts);   -- date range scans
 CREATE INDEX ix_labels_reported ON core.fraud_labels (reported_at);
 ```
 
-Particionado mensual de `transactions`: **no** a 3M filas (coste de complejidad > beneficio).
-Se documenta como mejora si el volumen creciera 100×.
+Monthly partitioning of `transactions`: **not** at 3M rows (complexity cost > benefit).
+Documented as an improvement if the volume grew 100×.
 
 ---
 
-## 5. Hipótesis
+## 5. Hypotheses
 
-Importante: algunas hipótesis son **parcialmente ciertas por construcción** (las metí en el
-generador). Lo que no está garantizado es que nuestras features recuperen la señal con ruido, ni
-que el modelo generalice en el tiempo. Lo marcamos explícitamente.
+Important: some hypotheses are **partly true by construction** (I put them in the generator). What
+is not guaranteed is that our features recover the signal through the noise, or that the model
+generalises over time. This is stated explicitly.
 
-| # | Hipótesis | ¿Por construcción? | Cómo se contrasta |
+| # | Hypothesis | By construction? | How it is tested |
 |---|---|---|---|
-| H1 | Las features de velocity por tarjeta mejoran PR-AUC sobre features solo de la transacción | Parcial (F1) | Ablación por grupos de features |
-| H2 | El importe **relativo** al historial del cliente es más informativo que el importe bruto | Parcial | PR-AUC univariante + ablación |
-| H3 | Las features de grafo de devices detectan F4, pero generan FPs en dispositivos compartidos legítimos | Parcial | Error analysis por escenario |
-| H4 | Gradient boosting supera a regresión logística por interacciones (device nuevo × importe alto × categoría) | No | LR con y sin términos de interacción vs HGB |
-| H5 | RF/HGB salen mal calibrados; Platt/isotonic mejoran Brier sin empeorar PR-AUC | No | Curvas de calibración en validation |
-| H6 | El threshold de coste óptimo está muy por debajo de 0,5 y depende del importe | No (consecuencia del coste) | Curva coste vs threshold |
-| H7 | CV aleatoria sobreestima PR-AUC frente a CV temporal | No | Mismo modelo, dos esquemas de validación |
-| H8 | Features "naive" (no point-in-time) inflan las métricas offline | No | Feature set deliberadamente con leakage vs correcto |
-| H9 | En producción simulada, PSI detecta el drift **antes** de que las etiquetas permitan ver la caída de rendimiento | Parcial (drift inyectado) | Timeline de alertas vs métricas con labels maduras |
-| H10 | El fraude *stealth* (F6) queda mayoritariamente sin detectar | Sí (es el suelo) | Recall por escenario |
-| H11 | Clientes con cuenta reciente (< 30 días) tienen peor rendimiento (cold start) | No | Métricas por segmento |
+| H1 | Card velocity features improve PR-AUC over transaction-only features | Partly (F1) | Ablation by feature group |
+| H2 | The amount **relative** to the customer's history is more informative than the raw amount | Partly | Univariate PR-AUC + ablation |
+| H3 | Device-graph features detect F4 but create FPs on legitimately shared devices | Partly | Error analysis by scenario |
+| H4 | Gradient boosting beats logistic regression through interactions (new device × high amount × category) | No | LR with and without interaction terms vs HGB |
+| H5 | RF/HGB come out badly calibrated; Platt/isotonic improve Brier without hurting PR-AUC | No | Calibration curves on validation |
+| H6 | The cost-optimal threshold is far below 0.5 and depends on the amount | No (a consequence of the cost model) | Cost vs threshold curve |
+| H7 | Random CV overestimates PR-AUC compared with temporal CV | No | Same model, two validation schemes |
+| H8 | "Naive" (not point-in-time) features inflate offline metrics | No | A deliberately leaky feature set vs the correct one |
+| H9 | In simulated production, PSI detects the drift **before** labels can show the performance drop | Partly (injected drift) | Timeline of alerts vs metrics on mature labels |
+| H10 | *Stealth* fraud (F6) mostly goes undetected | Yes (it is the floor) | Recall by scenario |
+| H11 | Customers with a recent account (< 30 days) get worse performance (cold start) | No | Metrics by segment |
 
 ---
 
 ## 6. Variables
 
-### 6.1 Reglas comunes a todas las features históricas
-- **Historia = transacciones con `ts` estrictamente anterior** a la transacción actual. La
-  transacción actual **no** se cuenta en su propia velocity (en la API todavía no está en la BD;
-  si offline la contáramos, habría training/serving skew).
-- Empates de timestamp: no se consideran "anteriores" (orden real desconocido) — decisión documentada.
-- Etiquetas: solo se usan las que tienen `reported_at < ts`.
-- Atributos de dimensiones: solo valores inmutables o conocidos en el momento (`first_seen_at ≤ ts`).
+### 6.1 Rules shared by every historical feature
+- **History = transactions with `ts` strictly before** the current transaction. The current
+  transaction is **not** counted in its own velocity (in the API it is not in the database yet; if
+  it were counted offline there would be training/serving skew).
+- Timestamp ties are not considered "earlier" (their real order is unknown) — a documented
+  decision.
+- Labels: only those with `reported_at < ts` are used.
+- Dimension attributes: only immutable values or values known at the time (`first_seen_at ≤ ts`).
 
-### 6.2 Catálogo
+### 6.2 Catalogue
 
-| Grupo | Feature | Por qué puede predecir | Riesgo de leakage / control |
+| Group | Feature | Why it may predict | Leakage risk / control |
 |---|---|---|---|
-| **Transacción** | `amount_eur`, `log_amount` | El fraude busca extraer valor | Bajo |
-| | `payment_method`, `merchant_category`, `merchant_risk_level` | Online y categorías revendibles concentran fraude | `risk_level`: ¿quién lo calculó y cuándo? Se asume rating externo fijado en el alta |
-| | `local_hour`, `day_of_week`, `is_weekend` | El fraude ocurre cuando la víctima duerme | Hora **local** del país de origen, no UTC |
-| | `is_cross_border`, `currency_is_foreign` | Uso fuera del patrón habitual | Bajo |
-| **Antigüedad / perfil** | `customer_age_at_txn`, `account_age_days`, `card_age_days`, `card_type`, `customer_segment` | Cuentas y tarjetas nuevas son más vulnerables | Calculadas a fecha `ts` |
-| **Velocity (card y customer)** | `txn_count_{5m,1h,24h,7d}` | Card testing y ATO generan ráfagas | Ventana `[ts − w, ts)` |
-| | `amount_sum_{1h,24h}` | Vaciado rápido de la tarjeta | Ídem |
-| | `small_txn_count_1h` (< 5 €) | Firma típica de card testing | Ídem |
-| | `time_since_prev_txn` (card, customer) | Intervalos anormalmente cortos | `LAG` sobre historia previa |
-| | `unique_merchants_24h`, `unique_countries_24h` | Dispersión anómala | **Postgres no permite `COUNT(DISTINCT)` en window functions** → `LATERAL` o self-join |
-| **Perfil relativo** | `amount_ratio_to_median_90d`, `amount_zscore_90d` | "Alto" es relativo a cada cliente | Mediana solo con historia previa; nulo si no hay historia |
-| | `merchant_new_for_customer`, `category_new_for_customer` | Fraude = merchants que la víctima nunca usa | Historia previa |
-| **Device** | `new_device_for_customer` | ATO usa un device nuevo | Historia previa del cliente |
-| | `unique_cards_per_device_{24h,30d}`, `unique_customers_per_device_30d` | Granjas de devices (F4) | **Nunca** el conteo global de toda la tabla |
-| | `device_country_mismatch` | Device registrado en otro país | `devices.country_code` = primer uso |
-| **Geo** | `country_changed` (vs transacción previa) | Cambio de ubicación | Historia previa |
-| | `new_country_for_customer_180d` | País nunca visto | Ídem |
-| | `distance_from_prev_km` | Desplazamiento | **Precisión de país**: centroides; mismo país = 0 km. No se inventa precisión |
-| | `implied_speed_kmh`, `impossible_travel` | Clonado presencial (F3) | Ídem; umbral documentado (p. ej. > 900 km/h) |
-| **Derivadas de etiquetas** (alto riesgo) | `card_prior_confirmed_fraud` | Tarjetas ya comprometidas | Solo `reported_at < ts` |
-| | `merchant_fraud_rate_90d_asof` | Merchants comprometidos (F5) | Solo labels ya reportadas + suavizado bayesiano; **sesgo de inmadurez**: las semanas recientes parecen limpias |
+| **Transaction** | `amount_eur`, `log_amount` | Fraud seeks to extract value | Low |
+| | `payment_method`, `merchant_category`, `merchant_risk_level` | Online and resellable categories concentrate fraud | `risk_level`: who computed it and when? Assumed to be an external rating set at onboarding |
+| | `local_hour`, `day_of_week`, `is_weekend` | Fraud happens while the victim sleeps | **Local** hour of the originating country, not UTC |
+| | `is_cross_border`, `currency_is_foreign` | Use outside the usual pattern | Low |
+| **Age / profile** | `customer_age_at_txn`, `account_age_days`, `card_age_days`, `card_type`, `customer_segment` | New accounts and cards are more vulnerable | Computed as of `ts` |
+| **Velocity (card and customer)** | `txn_count_{5m,1h,24h,7d}` | Card testing and ATO create bursts | Window `[ts − w, ts)` |
+| | `amount_sum_{1h,24h}` | Fast draining of the card | Same |
+| | `small_txn_count_1h` (< €5) | Typical card-testing signature | Same |
+| | `time_since_prev_txn` (card, customer) | Abnormally short intervals | `LAG` over earlier history |
+| | `unique_merchants_24h`, `unique_countries_24h` | Abnormal dispersion | **PostgreSQL does not allow `COUNT(DISTINCT)` in window functions** → `LATERAL` or a self-join |
+| **Relative profile** | `amount_ratio_to_median_90d`, `amount_zscore_90d` | "High" is relative to each customer | Median from earlier history only; null without history |
+| | `merchant_new_for_customer`, `category_new_for_customer` | Fraud = merchants the victim never uses | Earlier history |
+| **Device** | `new_device_for_customer` | ATO uses a new device | The customer's earlier history |
+| | `unique_cards_per_device_{24h,30d}`, `unique_customers_per_device_30d` | Device farms (F4) | **Never** the global count over the whole table |
+| | `device_country_mismatch` | Device registered in another country | `devices.country_code` = first use |
+| **Geo** | `country_changed` (vs the previous transaction) | A change of location | Earlier history |
+| | `new_country_for_customer_180d` | A country never seen | Same |
+| | `distance_from_prev_km` | Displacement | **Country precision**: centroids; same country = 0 km. No invented precision |
+| | `implied_speed_kmh`, `impossible_travel` | Card-present cloning (F3) | Same; documented threshold (e.g. > 900 km/h) |
+| **Label-derived** (high risk) | `card_prior_confirmed_fraud` | Cards already compromised | Only `reported_at < ts` |
+| | `merchant_fraud_rate_90d_asof` | Compromised merchants (F5) | Only labels already reported + Bayesian smoothing; **immaturity bias**: recent weeks look clean |
 
-Excluidas a propósito: cualquier ID como feature (`transaction_id` es monótono con el tiempo), el
-`label_source`, cualquier columna de `sim.*`.
+Excluded on purpose: any ID as a feature (`transaction_id` is monotonic in time), `label_source`,
+any column of `sim.*`.
 
-### 6.3 Experimento de control: feature set con leakage
-Construiremos también una versión **incorrecta** (conteos globales, ventanas centradas, labels sin
-`reported_at`) para **cuantificar** cuánto infla las métricas. Es la forma más convincente de
-demostrar que entiendes el leakage: medirlo, no solo describirlo.
+### 6.3 Control experiment: a leaky feature set
+A deliberately **wrong** version (global counts, centred windows, labels without `reported_at`)
+will also be built, to **quantify** how much it inflates the metrics. It is the most convincing
+way to show you understand leakage: measure it, not just describe it.
 
 ---
 
-## 7. Leakage temporal
+## 7. Temporal leakage
 
-### 7.1 Qué es (versión corta)
+### 7.1 What it is (short version)
 | | |
 |---|---|
-| **Qué es** | Que el modelo use, durante el entrenamiento o la evaluación, información que no existiría en el momento de la predicción |
-| **Para qué importa** | Las métricas offline salen excelentes y el modelo falla en producción |
-| **Por qué aquí especialmente** | Las features son agregados históricos, las etiquetas llegan con retraso y el fraude ocurre en campañas |
-| **Qué evita controlarlo** | Desplegar un modelo cuyo rendimiento real es muy inferior al reportado |
-| **Alternativa** | No la hay; solo grados de rigor en cómo se previene y se detecta |
+| **What it is** | The model using, during training or evaluation, information that would not exist at prediction time |
+| **Why it matters** | Offline metrics look excellent and the model fails in production |
+| **Why here especially** | Features are historical aggregates, labels arrive late, and fraud happens in campaigns |
+| **What controlling it prevents** | Deploying a model whose real performance is far below the reported one |
+| **Alternative** | None; only degrees of rigour in how it is prevented and detected |
 
-### 7.2 Catálogo de riesgos
+### 7.2 Risk catalogue
 
-| ID | Riesgo | Cómo aparece | Prevención | Detección |
+| ID | Risk | How it appears | Prevention | Detection |
 |---|---|---|---|---|
-| L1 | Ventanas que miran al futuro | `GROUP BY customer_id` sobre toda la tabla, ventanas sin límite superior | `RANGE BETWEEN INTERVAL 'w' PRECEDING ...` excluyendo la fila actual | Test *time-travel* |
-| L2 | Agregados globales | "clientes por device" calculado con 24 meses | Siempre ventana `[ts − w, ts)` | Test time-travel |
-| L3 | Etiquetas aún no conocidas | Usar `is_fraud` de transacciones previas cuyo chargeback llegó después | `reported_at < ts` | Test unitario con fixture de label tardía |
-| L4 | Etiquetas inmaduras al entrenar | Transacciones recientes parecen legítimas porque su label no ha llegado | Ventana de maduración (gap) entre train y test | Comparar tasa de fraude por mes de transacción vs fecha de snapshot |
-| L5 | Split aleatorio | La misma campaña de fraude y la misma tarjeta en train y test | Split temporal + gap | Experimento H7 |
-| L6 | Preprocesado sobre todo el dataset | Scaler, imputer, encoder o caps de outliers ajustados con test | `sklearn.Pipeline` ajustado solo en el fold de train | Revisión de código + test |
-| L7 | Dimensiones mutables | `customer_segment` cambiado a "bloqueado" tras el fraude; `device.country` = último visto | Atributos inmutables; prohibido usar `status` | Revisión del esquema |
-| L8 | Ground truth del simulador | Leer `sim.ground_truth` | Esquema separado | Test que analiza el SQL de features |
-| L9 | Threshold/calibración ajustados en test | "Elegir el mejor threshold" mirando test | Validation separado; test se toca **una vez** | Proceso + MLflow |
-| L10 | Tuning con datos futuros | CV aleatoria dentro de `RandomizedSearchCV` | `TimeSeriesSplit` (con gap) dentro del periodo de train | Configuración revisada |
-| L11 | IDs como features | El modelo memoriza el orden temporal | Lista explícita de columnas permitidas | Test de columnas esperadas |
-| L12 | Zonas horarias y empates | Timestamps mezclados UTC/local; dos transacciones en el mismo segundo | `timestamptz` en UTC; empates no cuentan como previos | Test |
+| L1 | Windows looking into the future | `GROUP BY customer_id` over the whole table, windows without an upper bound | `RANGE BETWEEN INTERVAL 'w' PRECEDING ...` excluding the current row | *Time-travel* test |
+| L2 | Global aggregates | "customers per device" computed over 24 months | Always a `[ts − w, ts)` window | Time-travel test |
+| L3 | Labels not yet known | Using `is_fraud` of earlier transactions whose chargeback came later | `reported_at < ts` | Unit test with a late-label fixture |
+| L4 | Immature labels at training time | Recent transactions look legitimate because their label has not arrived | A maturation window (gap) between train and test | Fraud rate by transaction month vs snapshot date |
+| L5 | Random split | The same fraud campaign and the same card in train and test | Temporal split + gap | Experiment H7 |
+| L6 | Preprocessing on the whole dataset | Scaler, imputer, encoder or outlier caps fitted with test | `sklearn.Pipeline` fitted on the train fold only | Code review + test |
+| L7 | Mutable dimensions | `customer_segment` changed to "blocked" after the fraud; `device.country` = last seen | Immutable attributes; `status` forbidden | Schema review |
+| L8 | The simulator's ground truth | Reading `sim.ground_truth` | Separate schema | Test that inspects the feature SQL |
+| L9 | Threshold/calibration tuned on test | "Choosing the best threshold" by looking at test | A separate validation; test touched **once** | Process + MLflow |
+| L10 | Tuning with future data | Random CV inside `RandomizedSearchCV` | `TimeSeriesSplit` (with a gap) inside the train period | Reviewed configuration |
+| L11 | IDs as features | The model memorises temporal order | Explicit list of allowed columns | Expected-columns test |
+| L12 | Time zones and ties | UTC/local timestamps mixed; two transactions in the same second | `timestamptz` in UTC; ties do not count as earlier | Test |
 
-### 7.3 Técnicas de detección concretas
-1. **Test time-travel:** para una muestra de transacciones, recalcular sus features usando una BD
-   truncada a `ts` y comparar con la tabla materializada. Deben ser idénticas.
-2. **Test de paridad offline/online:** la API y el batch deben dar las mismas features.
-3. **Sospecha por métricas:** una feature con PR-AUC univariante altísimo se investiga antes de celebrarla.
-4. **Gap entre validación aleatoria y temporal** (H7) y **feature set con leakage** (6.3).
+### 7.3 Concrete detection techniques
+1. **Time-travel test:** for a sample of transactions, recompute their features on a database
+   truncated at `ts` and compare with the materialised table. They must be identical.
+2. **Offline/online parity test:** the API and the batch job must give the same features.
+3. **Suspicion from metrics:** a feature with a very high univariate PR-AUC is investigated before
+   being celebrated.
+4. **The gap between random and temporal validation** (H7) and **the leaky feature set** (6.3).
 
 ---
 
-## 8. Estrategia de validación temporal
+## 8. Temporal validation strategy
 
 ```
 2024-07 ─────────────── 2025-06 │ 2025-07 ── 09 │ 2025-10 ── 12 │ 2026-01 ──────────── 2026-06
-          TRAIN (12m)           │ VALIDATION 3m │   TEST 3m     │ PRODUCCIÓN SIMULADA 6m
-  TimeSeriesSplit + tuning      │ calibración + │ se toca UNA   │ batch diario + monitoring
-                                │ thresholds    │ vez           │ drift desde 2026-03
+          TRAIN (12m)           │ VALIDATION 3m │   TEST 3m     │ SIMULATED PRODUCTION 6m
+  TimeSeriesSplit + tuning      │ calibration + │ touched ONCE  │ daily batch + monitoring
+                                │ thresholds    │               │ drift from 2026-03
 ```
 
-- **CV interna (solo en TRAIN):** expanding window, 4 folds, con **gap** entre train y test de cada
-  fold para que las ventanas de velocity y la maduración de labels no se solapen.
-- **Validation:** calibración (Platt/isotonic) y optimización de la política de coste.
-- **Test:** evaluación final, intervalos de confianza por *block bootstrap* por días (las
-  transacciones de una misma campaña no son independientes).
-- **Producción simulada:** las etiquetas se van revelando según `reported_at`; el rendimiento solo
-  se puede medir con retraso — exactamente el problema real de monitoring.
-- **Simplificación declarada:** la evaluación offline (train/val/test) es un estudio retrospectivo
-  con etiquetas maduras. El retraso de etiquetas afecta a las features derivadas de labels, al
-  monitoring y a la estrategia de retraining.
+- **Internal CV (TRAIN only):** expanding window, 4 folds, with a **gap** between the train and
+  test part of each fold so that velocity windows and label maturation do not overlap.
+- **Validation:** calibration (Platt/isotonic) and optimisation of the cost policy.
+- **Test:** final evaluation, confidence intervals by *block bootstrap* over days (transactions of
+  the same campaign are not independent).
+- **Simulated production:** labels are revealed according to `reported_at`; performance can only
+  be measured with delay — exactly the real monitoring problem.
+- **Declared simplification:** the offline evaluation (train/val/test) is a retrospective study
+  with mature labels. Label delay affects label-derived features, monitoring and the retraining
+  strategy.
 
 ---
 
-## 9. Métricas
+## 9. Metrics
 
-| Nivel | Métrica | Uso |
+| Level | Metric | Use |
 |---|---|---|
-| Referencia | **Base rate** | Un modelo aleatorio tiene PR-AUC ≈ base rate (~0,01). Ancla para interpretar todo lo demás |
-| Ranking | **PR-AUC (Average Precision)** | Selección de modelos |
-| | ROC-AUC | Se reporta, no decide (con desbalance extremo parece buena aunque la precisión sea mala) |
-| | Recall @ capacidad de revisión | "Con K revisiones/día, ¿cuánto fraude cazamos?" |
-| Probabilidades | Brier score, log loss, curva de calibración | Si `0,3` significa realmente 30% |
-| Negocio | **Coste total esperado (€)**, coste por 1.000 transacciones | Selección de la política |
-| | Ahorro vs `approve-all` y vs reglas baseline | ¿Aporta valor el ML? |
-| | Recall ponderado por importe (€ de fraude detectado / € de fraude total) | No todos los fraudes valen lo mismo |
-| | False decline rate, review rate, block rate | Experiencia de cliente y operaciones |
-| Servicio | Latencia p50/p95, tasa de error | API |
-| Monitoring | PSI, KS, media de score, % high-risk, métricas por cohorte madura | Fase 12 |
+| Reference | **Base rate** | A random model has PR-AUC ≈ base rate (~0.01). The anchor for reading everything else |
+| Ranking | **PR-AUC (Average Precision)** | Model selection |
+| | ROC-AUC | Reported, does not decide (with extreme imbalance it looks good even when precision is bad) |
+| | Recall @ review capacity | "With K reviews a day, how much fraud do we catch?" |
+| Probabilities | Brier score, log loss, calibration curve | Whether `0.3` really means 30% |
+| Business | **Total expected cost (€)**, cost per 1,000 transactions | Policy selection |
+| | Savings vs `approve-all` and vs baseline rules | Does ML add value? |
+| | Amount-weighted recall (€ of fraud detected / € of total fraud) | Not all fraud is worth the same |
+| | False decline rate, review rate, block rate | Customer experience and operations |
+| Service | Latency p50/p95, error rate | API |
+| Monitoring | PSI, KS, mean score, % high risk, metrics per mature cohort | Phase 12 |
 
-Accuracy se reporta una sola vez, para mostrar por qué engaña (un modelo que aprueba todo tendría
-~99% de accuracy).
+Accuracy is reported once, to show why it misleads (a model that approves everything would have
+~99% accuracy).
 
 ---
 
-## 10. Modelo de coste
+## 10. Cost model
 
-### 10.1 Por qué no costes planos
-Con un coste fijo de 500 € por falso negativo, dejar pasar un card test de 2 € "cuesta" igual que
-un portátil de 2.000 €. En la práctica la pérdida principal es el **importe**. Por eso el coste
-depende del importe `A` (en €).
+### 10.1 Why not flat costs
+With a flat €500 cost per false negative, letting a €2 card test through "costs" the same as a
+€2,000 laptop. In practice the main loss is the **amount**. So the cost depends on the amount `A`
+(in €).
 
-### 10.2 Supuestos (en `configs/costs.yaml`, todos ajustables)
+### 10.2 Assumptions (in `configs/costs.yaml`, all adjustable)
 
-| Símbolo | Supuesto | Valor inicial | Justificación |
+| Symbol | Assumption | Initial value | Justification |
 |---|---|---|---|
-| `F` | Comisión + gestión de chargeback | 15 € | Coste operativo por disputa |
-| `c_r` | Coste de una revisión | 4 € | ~4 min de analista |
-| `ρ` | Recall del analista/step-up sobre fraude revisado | 0,90 | La revisión no es perfecta |
-| `f_r` | Fricción por revisar a un cliente legítimo | 1 € | Retraso/OTP |
-| `m` | Margen perdido al bloquear un legítimo | 2% de `A` | Interchange/comisión |
-| `f_b` | Fricción por bloqueo injusto (soporte, churn) | 10 € | Contacto con soporte, riesgo de baja |
-| `K` | Capacidad de revisión diaria | parámetro (≈ 2× fraudes diarios esperados) | Restricción operativa |
+| `F` | Chargeback fee + handling | €15 | Operational cost per dispute |
+| `c_r` | Cost of one review | €4 | ~4 minutes of an analyst |
+| `ρ` | Recall of the analyst / step-up on reviewed fraud | 0.90 | Review is not perfect |
+| `f_r` | Friction of reviewing a legitimate customer | €1 | Delay / OTP |
+| `m` | Margin lost by blocking a legitimate payment | 2% of `A` | Interchange / fee |
+| `f_b` | Friction of a wrongful block (support, churn) | €10 | Support contact, churn risk |
+| `K` | Daily review capacity | parameter (≈ 2× expected daily frauds) | Operational constraint |
 
-Simplificación: asumimos que la fintech absorbe el 100% de la pérdida por fraude (sin liability
-shift por 3DS).
+Simplification: the fintech is assumed to absorb 100% of the fraud loss (no liability shift from
+3DS).
 
-### 10.3 Coste esperado de cada acción (dado `p = P(fraude)`)
+### 10.3 Expected cost of each action (given `p = P(fraud)`)
 
 ```
 E[approve] = p · (A + F)
@@ -576,111 +578,110 @@ E[review]  = c_r + p · (1 − ρ) · (A + F) + (1 − p) · f_r
 E[block]   = (1 − p) · (m · A + f_b)
 ```
 
-Ejemplo con los supuestos de arriba (aritmética, no resultados):
+Example with the assumptions above (arithmetic, not results):
 
-| Importe | approve si | review si | block si |
+| Amount | approve if | review if | block if |
 |---|---|---|---|
-| 20 € | p < 0,154 | 0,154 ≤ p < 0,419 | p ≥ 0,419 |
-| 200 € | p < 0,026 | 0,026 ≤ p < 0,261 | p ≥ 0,261 |
+| €20 | p < 0.154 | 0.154 ≤ p < 0.419 | p ≥ 0.419 |
+| €200 | p < 0.026 | 0.026 ≤ p < 0.261 | p ≥ 0.261 |
 
-Conclusión de diseño: **los thresholds óptimos dependen del importe**, y para importes altos el
-umbral de revisión es muy inferior a 0,5.
+Design conclusion: **the optimal thresholds depend on the amount**, and for high amounts the
+review threshold is far below 0.5.
 
-### 10.4 Dos políticas a comparar (Fase 8)
-1. **P1 — Thresholds globales** `(t_review, t_block)`: grid search en validation minimizando el
-   coste realizado, sujeto a `reviews/día ≤ K`. Produce la gráfica *threshold vs coste esperado*
-   (y un heatmap 2D).
-2. **P2 — Decisión por transacción** (argmin del coste esperado con `p` calibrada y `A`), llenando
-   la capacidad de revisión con las transacciones de mayor beneficio esperado. **Solo es válida si
-   las probabilidades están calibradas** → por eso la calibración es necesaria y no decorativa.
+### 10.4 Two policies to compare (Phase 8)
+1. **P1 — Global thresholds** `(t_review, t_block)`: grid search on validation minimising the
+   realised cost, subject to `reviews/day ≤ K`. Produces the *threshold vs expected cost* chart
+   (and a 2-D heatmap).
+2. **P2 — Per-transaction decision** (argmin of the expected cost with calibrated `p` and `A`),
+   filling the review capacity with the transactions of highest expected benefit. **Only valid if
+   the probabilities are calibrated** → which is why calibration is necessary, not decorative.
 
-### 10.5 Análisis de sensibilidad
-Variar `F`, `c_r`, `f_b`, `ρ` y `K` (±50%) y ver cuánto cambian la política óptima y el coste.
-Mensaje: **los números son supuestos; el entregable es el método.**
-Limitación conocida: bloquear un card test pequeño evita fraudes grandes posteriores; el coste
-por transacción no captura ese efecto en cadena.
-
----
-
-## 11. Baselines y modelos
-
-| Modelo | Papel |
-|---|---|
-| B0 `approve-all` | Coste de referencia (no hacer nada) |
-| B1 Umbral de importe | Una sola regla, ajustada en train |
-| B2 Reglas de experto | 3–5 reglas como las escribiría un analista (importe alto + device nuevo; > N transacciones en 1h; viaje imposible), usando las **mismas** features point-in-time |
-| M1 Logistic Regression | Lineal, interpretable, calibrada de serie; `class_weight` |
-| M2 Random Forest | No lineal; suele salir mal calibrado (H5) |
-| M3 HistGradientBoosting | Candidato principal; maneja nulos y escalas sin preprocesado pesado |
-
-Criterio de éxito: ML debe batir a **B2** en coste en test, con intervalos que no se solapen. Si no
-lo consigue, se dice.
-
-Desbalance: se compararán `class_weight` y threshold tuning. SMOTE **no** se aplica por defecto:
-genera transacciones interpoladas que no existen (p. ej. mezcla de dos tarjetas con historias
-incompatibles) y distorsiona las probabilidades, lo que rompe la calibración que necesitamos para P2.
-Solo se probaría si `class_weight` resultara claramente insuficiente.
+### 10.5 Sensitivity analysis
+Vary `F`, `c_r`, `f_b`, `ρ` and `K` (±50%) and see how much the optimal policy and the cost change.
+Message: **the numbers are assumptions; the deliverable is the method.**
+Known limitation: blocking a small card test prevents later large frauds; a per-transaction cost
+does not capture that chain effect.
 
 ---
 
-## 12. Lo que NO vamos a usar (y por qué)
+## 11. Baselines and models
 
-| Tecnología | Motivo |
+| Model | Role |
 |---|---|
-| Kafka / streaming | Una API síncrona contra Postgres basta para demostrar scoring online |
-| Airflow / Prefect | Pipeline lineal en una máquina → CLI |
-| Spark | 3M filas caben en Postgres + pandas |
-| Feature store (Feast) | El problema que resuelve (paridad offline/online) lo cubrimos con SQL compartido + test |
-| Kubernetes / despliegue cloud | Fuera del objetivo; Docker basta para reproducibilidad |
-| DVC | El dataset se regenera de forma determinista (seed + versión del simulador); se registra su hash en MLflow |
-| Deep learning / GNN | Tabular con pocas features: GBM es el estándar; un GNN sería una mejora futura para el grafo de devices |
+| B0 `approve-all` | Reference cost (doing nothing) |
+| B1 Amount threshold | A single rule, fitted on train |
+| B2 Expert rules | 3–5 rules as an analyst would write them (high amount + new device; > N transactions in 1h; impossible travel), using the **same** point-in-time features |
+| M1 Logistic Regression | Linear, interpretable, calibrated out of the box; `class_weight` |
+| M2 Random Forest | Non-linear; usually badly calibrated (H5) |
+| M3 HistGradientBoosting | Main candidate; handles nulls and scales without heavy preprocessing |
+
+Success criterion: ML must beat **B2** on cost in test, with non-overlapping intervals. If it does
+not, that is said.
+
+Imbalance: `class_weight` and threshold tuning will be compared. SMOTE is **not** applied by
+default: it creates interpolated transactions that do not exist (e.g. a mix of two cards with
+incompatible histories) and distorts probabilities, which breaks the calibration P2 needs. It
+would only be tried if `class_weight` turned out clearly insufficient.
 
 ---
 
-## 13. Riesgos del proyecto
+## 12. What we will NOT use (and why)
 
-| Riesgo | Mitigación |
+| Technology | Reason |
 |---|---|
-| Circularidad del dataset sintético | Sección 3.2 + sanity check opcional con Sparkov + honestidad en el README |
-| Features `COUNT(DISTINCT)` en ventana lentas en Postgres a 3M filas | Índices (entidad, ts); medir; si es inviable, calcular esas features en Python con la misma semántica y testear paridad |
-| Ajustar el simulador hasta que "salga bien" | Generador congelado y versionado antes de la Fase 6 |
-| Scope creep | Cada fase con criterio de salida; lo opcional va a "Future improvements" |
-| Entorno Windows | Todo dentro de Docker (Postgres, API); el código Python es multiplataforma; CI en Linux |
+| Kafka / streaming | A synchronous API against PostgreSQL is enough to demonstrate online scoring |
+| Airflow / Prefect | A linear pipeline on one machine → a CLI |
+| Spark | 3M rows fit in PostgreSQL + pandas |
+| Feature store (Feast) | The problem it solves (offline/online parity) is covered with shared SQL + a test |
+| Kubernetes / cloud deployment | Out of scope; Docker is enough for reproducibility |
+| DVC | The dataset is regenerated deterministically (seed + simulator version); its hash is logged in MLflow |
+| Deep learning / GNN | Tabular data with few features: GBM is the standard; a GNN would be a future improvement for the device graph |
+
+---
+
+## 13. Project risks
+
+| Risk | Mitigation |
+|---|---|
+| Circularity of the synthetic dataset | Section 3.2 + optional Sparkov sanity check + honesty in the README |
+| Window `COUNT(DISTINCT)` features slow in PostgreSQL at 3M rows | (entity, ts) indexes; measure; if unworkable, compute those features in Python with the same semantics and test parity |
+| Tweaking the simulator until "it works" | Generator frozen and versioned before Phase 6 |
+| Scope creep | Every phase has an exit criterion; optional work goes to "Future improvements" |
+| Windows environment | Everything inside Docker (PostgreSQL, API); the Python code is cross-platform; CI on Linux |
 
 ---
 
 ## 14. Roadmap
 
-Cada fase = una rama `feature/...` + un Pull Request con objetivo, cambios, validación y riesgos.
-**Cambio propuesto:** CI mínima (ruff + pytest) desde la Fase 2, no en la Fase 11 — los tests se
-escriben junto al código. La Fase 11 la amplía (Postgres en CI, Docker build).
+Each phase = a `feature/...` branch + a pull request with objective, changes, validation and
+risks. **Proposed change:** minimal CI (ruff + pytest) from Phase 2, not Phase 11 — tests are
+written with the code. Phase 11 extends it (PostgreSQL in CI, Docker build).
 
-| Fase | Rama | Entregables | Criterio de salida |
+| Phase | Branch | Deliverables | Exit criterion |
 |---|---|---|---|
-| 2 | `feature/simulator-and-db` | Simulador por escenarios, `docker-compose` con Postgres, esquemas `raw`/`core`, carga, CI mínima | Misma seed → mismo hash de datos; tasa de fraude en rango objetivo; reporte de mezcla de escenarios |
-| 3 | `feature/data-quality-sql` | Reglas DQ en SQL, cuarentena, reporte DQ, consultas analíticas (CTE, window, HAVING, subqueries) | Recall de cada regla DQ medido contra los defectos inyectados |
-| 4 | `feature/eda` | Notebook EDA + estadística: base rate, skewness, outliers, tasas de fraude con **intervalos de Wilson**, Cramér's V / Spearman, distribución del retraso de labels | Hallazgos escritos, incluidos los que no salen como se esperaba |
-| 5 | `feature/temporal-features` | SQL point-in-time, tabla materializada, tests time-travel y de no-negatividad, feature set con leakage | Tests time-travel en verde; análisis univariante por feature |
-| 6 | `feature/baselines-and-models` | B0–B2, LR, RF, HGB en `Pipeline`, MLflow | Tabla comparativa en validation con base rate de referencia |
-| 7 | `feature/temporal-validation` | TimeSeriesSplit con gap, tuning (`RandomizedSearchCV` en RF/HGB, `GridSearchCV` en `C` de LR), experimentos H7 y H8 | Gap aleatoria vs temporal y leaky vs clean cuantificados |
-| 8 | `feature/cost-threshold-calibration` | Calibración, curvas, coste, P1 vs P2, capacidad, sensibilidad | Política elegida en validation; test evaluado una vez |
-| 9 | `feature/error-analysis` | FP/FN por segmento y escenario, permutation importance + SHAP, borrador de model card | "¿Dónde se equivoca el modelo?" respondido con datos |
-| 10 | `feature/api-and-batch` | FastAPI `/predict` + `/health`, features online, batch scoring, test de paridad | Paridad offline/online en verde; latencia medida |
-| 11 | `feature/docker-ci` | Dockerfile, compose completo, CI: ruff → pytest (con Postgres) → docker build | CI verde en un PR |
-| 12 | `feature/monitoring` | Replay de producción simulada, PSI/KS, drift de predicción, rendimiento diferido, reglas de retraining, reporte HTML | Línea temporal: cuándo salta cada alerta vs cuándo empezó el drift |
-| 13 | `feature/documentation` | README, final report, model card, `decisions.md`, arquitectura | Alguien externo puede reproducir el proyecto desde cero |
-| 14 | — | Revisión tipo tech lead + preparación de entrevista | Puntuaciones y preguntas |
+| 2 | `feature/simulator-and-db` | Scenario simulator, `docker-compose` with PostgreSQL, `raw`/`core` schemas, loading, minimal CI | Same seed → same data hash; fraud rate in the target range; scenario mix report |
+| 3 | `feature/data-quality-sql` | DQ rules in SQL, quarantine, DQ report, analytical queries (CTE, window, HAVING, subqueries) | Recall of every DQ rule measured against the injected defects |
+| 4 | `feature/eda` | EDA notebook + statistics: base rate, skewness, outliers, fraud rates with **Wilson intervals**, Cramér's V / Spearman, label delay distribution | Findings written down, including those that go against expectations |
+| 5 | `feature/temporal-features` | Point-in-time SQL, materialised table, time-travel and non-negativity tests, leaky feature set | Time-travel tests green; univariate analysis per feature |
+| 6 | `feature/baselines-and-models` | B0–B2, LR, RF, HGB in a `Pipeline`, MLflow | Comparison table on validation with the base rate as reference |
+| 7 | `feature/temporal-validation` | TimeSeriesSplit with a gap, tuning (`RandomizedSearchCV` for RF/HGB, `GridSearchCV` for LR's `C`), experiments H7 and H8 | Random vs temporal gap and leaky vs clean quantified |
+| 8 | `feature/cost-threshold-calibration` | Calibration, curves, cost, P1 vs P2, capacity, sensitivity | Policy chosen on validation; test evaluated once |
+| 9 | `feature/error-analysis` | FP/FN by segment and scenario, permutation importance + SHAP, model card draft | "Where does the model fail?" answered with data |
+| 10 | `feature/api-and-batch` | FastAPI `/predict` + `/health`, online features, batch scoring, parity test | Offline/online parity green; latency measured |
+| 11 | `feature/docker-ci` | Dockerfile, full compose, CI: ruff → pytest (with PostgreSQL) → docker build | CI green on a PR |
+| 12 | `feature/monitoring` | Replay of simulated production, PSI/KS, prediction drift, delayed performance, retraining rules, HTML report | Timeline: when each alert fires vs when the drift started |
+| 13 | `feature/documentation` | README, final report, model card, `decisions.md`, architecture | Someone external can reproduce the project from scratch |
+| 14 | — | Tech-lead style review + interview preparation | Scores and questions |
 
-Estimación honesta: 5–8 semanas a tiempo parcial. Las fases 2, 5 y 8 son las más largas.
+Honest estimate: 5–8 weeks part time. Phases 2, 5 and 8 are the longest.
 
 ---
 
-## 15. Preguntas abiertas para validar
+## 15. Open questions (answered before Phase 2)
 
-1. **Dataset:** ¿de acuerdo con simulador propio + sanity check opcional en Sparkov?
-2. **Coste:** ¿coste dependiente del importe + capacidad de revisión, en lugar de costes planos?
-3. **Etiquetas:** ¿tabla `fraud_labels` con `reported_at` en lugar de `transactions.is_fraud`?
-4. **Idioma del repositorio:** código, README y docs en inglés (recomendado para portfolio) y
-   conversación en español, o todo en español.
-5. **Escala:** ~3M transacciones / 30k clientes.
-6. **Ubicación:** carpeta local del proyecto y nombre del repositorio en GitHub.
+1. **Dataset:** own simulator + optional Sparkov sanity check? — *own simulator.*
+2. **Cost:** amount-dependent cost + review capacity instead of flat costs? — *yes.*
+3. **Labels:** a `fraud_labels` table with `reported_at` instead of `transactions.is_fraud`? — *yes.*
+4. **Repository language:** code, README and docs in English, conversation in Spanish? — *yes.*
+5. **Scale:** ~3M transactions / 30k customers? — *yes.*
+6. **Location:** local project folder and GitHub repository name — *`fraud-detection-platform`.*

@@ -1,7 +1,7 @@
 # Model card: transaction fraud risk score v1
 
-Draft (Phases 9–10). Final version in Phase 13. Every number below comes from a recorded run;
-sources are linked.
+Version 1, final (Phase 13). Every number below comes from a recorded run; sources are linked.
+The whole project is summarised in the [final report](final_report.md).
 
 ## Model details
 
@@ -13,7 +13,8 @@ sources are linked.
 | Decision policy | per transaction, the action (approve / review / block) with the lowest expected cost, max 60 reviews per day (decision 021) |
 | Artefacts | `data/processed/phase8/model.skops` (skops, explicit trusted types), [`reports/policy/policy_v1.json`](policy/policy_v1.json); hashes in [`frozen_bundle.sha256`](policy/frozen_bundle.sha256) |
 | Lineage | dataset v1.0.1 `350d74bd…`, feature set v1.0.0, data quality run and feature build recorded in MLflow tags |
-| Serving | real-time `POST /predict` and batch `fraud serve batch`, both from the same frozen bundle: model version `fcf88c67457e`, policy version `65a2111fa8c2` (first 12 hex digits of their SHA-256). Online and offline model inputs are identical bit for bit (decision 024); see [serving findings](serving/phase10_findings.md) |
+| Serving | real-time `POST /predict` and batch `fraud serve batch`, both from the same frozen bundle: model version `fcf88c67457e`, policy version `65a2111fa8c2` (first 12 hex digits of their SHA-256; they identify the files, so the same model saved again gets another version, see [reproducibility](../docs/reproducibility.md#5-checking-your-result)). Online and offline model inputs are identical bit for bit (decision 024); see [serving findings](serving/phase10_findings.md) |
+| Environment | scikit-learn 1.9.1, numpy 2.5.4, pandas 3.0.6 (trained on Windows, Python 3.13.1). The Docker images pin the same versions; on Linux the tree outputs are identical and 0.4% of probabilities differ by 1–2 ulps, with no decision changed (decision 027). `fraud serve verify-bundle` checks any new environment |
 | Author | portfolio project; synthetic data only |
 
 ## Purpose
@@ -24,9 +25,9 @@ explicit business assumptions ([`configs/costs.yaml`](../configs/costs.yaml)).
 
 ## Training data
 
-- **Synthetic**, from the project's simulator (v1.0.1): 30,000 customers, 2.86M transactions
-  over 24 months, six fraud scenarios plus a drift scenario from March 2026, delayed and noisy
-  labels. Nothing in it describes real people or real fraud rates.
+- **Synthetic**, from the project's simulator (v1.0.1): 29,970 customers and 2.85M transactions
+  after data quality, over 24 months, six fraud scenarios plus a drift scenario from March 2026,
+  delayed and noisy labels. Nothing in it describes real people or real fraud rates.
 - Trained on 2024-10-01 → 2025-06-30 (1,024,160 transactions, base rate 0.85%); the first 92
   days of data are excluded as feature warm-up (decision 016).
 - Labels: fraud reported (chargeback, customer report, investigation) within 120 days.
@@ -59,6 +60,14 @@ confounder of cross-border use).
 Baselines on validation: seven expert rules PR-AUC 0.256 (policy cost €520,946); amount alone
 0.026. Sources: [`phase6_findings.md`](models/phase6_findings.md),
 [`phase8_findings.md`](policy/phase8_findings.md).
+
+**In simulated production** (January–June 2026, judged afterwards with every label known), with a
+drift from March:
+- the model still stops 76% of the new wallet fraud pattern;
+- but it under-predicts fraud (observed 1.51% vs predicted 1.10% in the week of 9 April);
+- weekly recall on reported fraud slides from 0.857 (January–February) to 0.778 (May–June).
+
+Source: [`phase12_findings.md`](monitoring/phase12_findings.md).
 
 ## Intended use
 
@@ -102,7 +111,7 @@ Baselines on validation: seven expert rules PR-AUC 0.256 (policy cost €520,946
 - **Feedback loops**: blocked payments never generate chargebacks, so future labels will be
   biased towards what the model lets through.
 - **Leakage regressions**: a future feature that uses unreported labels or a future window
-  would look excellent offline (Phase 7: 0.847) and fail in production (0.399).
+  would look excellent offline (Phase 7: 0.852) and fail in production (0.401).
 
 ## Monitoring (Phase 12)
 
