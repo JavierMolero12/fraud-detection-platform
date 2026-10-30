@@ -113,6 +113,23 @@ dataset.)
 - `GET /health` and `GET /model` (versions, policy, training period, lineage) are also available.
 - Interactive docs: `/docs`.
 
+### Payment simulator
+
+With the API running, `fraud serve simulator` serves a page on http://127.0.0.1:8001 that walks
+through one payment at a time. It offers twelve batch-scored payments of the production period,
+one of each kind (legitimate, each fraud scenario, a missed fraud, a false positive). It sends the
+one you pick to `POST /predict` and shows, step by step:
+
+1. what the API receives;
+2. its answer: probability, risk level, decision and response time;
+3. 14 of the 50 features it logged, all computed from history before the payment;
+4. the expected cost of approving, reviewing and blocking;
+5. the generator's truth, which the API never reads.
+
+The amount can be changed before sending, to watch the decision move. Each prediction the
+simulator causes is deleted right after its answer. The page's text is in Spanish. On a smaller
+dataset it offers only the kinds it finds; `--api-url` and `--port` change the addresses.
+
 ## What is where
 
 | Area | Code | Results |
@@ -151,6 +168,7 @@ Phase by phase, one branch and one pull request each; every PR description is in
 | 12 · monitoring | [PR-12](docs/pull_requests/PR-12-monitoring.md) |
 | 13 · documentation | [PR-13](docs/pull_requests/PR-13-documentation.md) |
 | 14 · tech-lead review | [PR-14](docs/pull_requests/PR-14-tech-lead-review.md) |
+| After 14 · payment simulator | [PR-15](docs/pull_requests/PR-15-payment-simulator.md) |
 
 ## Tests
 
