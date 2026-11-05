@@ -296,6 +296,7 @@ class ServingConfig(BaseModel):
     bundle_dir: Path
     risk_levels: RiskLevels
     log_features: bool = True
+    statement_timeout_ms: int = Field(default=500, gt=0)
 
 
 def load_serving_config(path: Path | None = None) -> ServingConfig:

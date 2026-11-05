@@ -159,6 +159,16 @@ def test_a_retried_request_returns_the_logged_decision(conn, client):
     assert count == 1
 
 
+def test_a_query_over_the_time_budget_gets_503_not_a_wait(conn, bundle_dir, db_url):
+    # 1 ms: the feature query cannot finish in time, so PostgreSQL cancels it.
+    serving = ServingConfig(bundle_dir=bundle_dir, risk_levels=RISK, statement_timeout_ms=1)
+    body = _body(_stored(conn, "true", 1)[0], prefix="slow-")
+    with TestClient(create_app(serving, db_url, pool_size=1)) as slow:
+        r = slow.post("/predict", json=body)
+    assert r.status_code == 503
+    assert r.json()["detail"] == "scoring exceeded its time budget"
+
+
 def test_unknown_entities_and_currencies_are_rejected(conn, client):
     body = _body(_stored(conn, "true", 1)[0], prefix="bad-")
     for change in (
