@@ -269,6 +269,20 @@ def serve_api(
     run_api(host, port, workers)
 
 
+@serve_app.command("simulator")
+def serve_simulator(
+    api_url: Annotated[str, typer.Option(help="The running scoring API")] = "http://127.0.0.1:8000",
+    host: Annotated[str, typer.Option()] = "127.0.0.1",
+    port: Annotated[int, typer.Option()] = 8001,
+) -> None:
+    """A web page that sends stored payments to the API, step by step (its text is in Spanish)."""
+    from fraudplatform.db import database_url
+    from fraudplatform.serving.simulator import run_simulator
+
+    typer.echo(f"Payment simulator on http://{host}:{port} (Ctrl-C to stop)")
+    run_simulator(api_url, database_url(), host, port)
+
+
 @serve_app.command("batch")
 def serve_batch(
     start: Annotated[str | None, typer.Option(help="YYYY-MM-DD, default: production start")] = None,

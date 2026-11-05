@@ -182,3 +182,15 @@ def test_the_listening_socket_is_declared_tcp_so_connections_get_tcp_nodelay():
         assert sock.getsockname()[1] > 0
     finally:
         sock.close()
+
+
+# --- payment simulator ----------------------------------------------------------------------
+
+
+def test_the_simulator_explains_every_scenario_and_shows_only_real_features():
+    from fraudplatform.config import DRIFT_SCENARIO, SCENARIOS
+    from fraudplatform.serving import simulator
+
+    assert set(simulator.SCENARIOS) == {"legit", *SCENARIOS, DRIFT_SCENARIO}
+    assert {key for key, _ in simulator.FEATURES} <= set(FEATURE_NAMES)
+    assert simulator.PAGE.is_file()

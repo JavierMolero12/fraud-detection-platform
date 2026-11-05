@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simulador de pagos</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --surface: #ffffff; --ink: #1f2328; --ink-2: #57606a; --ink-3: #8b949e;
+    --line: #e4e4e0; --accent: #2f6fde; --accent-soft: rgba(47, 111, 222, .12);
+    --good: #1a7f37; --good-soft: rgba(26, 127, 55, .12);
+    --warn: #9a6700; --warn-soft: rgba(154, 103, 0, .14);
+    --bad: #c62828; --bad-soft: rgba(198, 40, 40, .12);
+    --bar: #c9ccd1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15171a; --surface: #1d2024; --ink: #e8eaed; --ink-2: #a8b0b8; --ink-3: #7a838c;
+      --line: #2e3238; --accent: #6ea2ff; --accent-soft: rgba(110, 162, 255, .16);
+      --good: #57c27a; --good-soft: rgba(87, 194, 122, .16);
+      --warn: #e0b04a; --warn-soft: rgba(224, 176, 74, .16);
+      --bad: #ff7b72; --bad-soft: rgba(255, 123, 114, .16);
+      --bar: #4a5058;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 20px 24px 8px; }
+  h1 { margin: 0; font-size: 22px; }
+  .subtitle { color: var(--ink-2); margin: 4px 0 0; }
+  main { display: grid; grid-template-columns: 300px 1fr; gap: 20px; padding: 16px 24px 32px; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; padding: 12px 16px; } }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-2); margin: 0 0 12px; }
+  .list { display: flex; flex-direction: column; gap: 8px; }
+  .case { text-align: left; background: var(--surface); color: var(--ink); border: 1px solid var(--line);
+          border-radius: 8px; padding: 10px 12px; cursor: pointer; font: inherit; }
+  .case:hover { border-color: var(--ink-3); }
+  .case.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .case .amount { font-weight: 600; }
+  .case .meta { color: var(--ink-2); font-size: 13px; }
+  .steps { display: flex; flex-direction: column; gap: 16px; }
+  .step h3 { margin: 0 0 10px; font-size: 16px; }
+  .step h3 .n { display: inline-block; width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft);
+                color: var(--accent); text-align: center; line-height: 24px; font-size: 13px; margin-right: 8px; }
+  .hidden { display: none; }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td:first-child { color: var(--ink-2); width: 55%; padding-right: 12px; }
+  td:last-child { font-variant-numeric: tabular-nums; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+  input[type=number] { font: inherit; padding: 6px 8px; width: 140px; border-radius: 6px;
+                       border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  button.primary { font: inherit; font-weight: 600; padding: 8px 16px; border-radius: 8px; border: 0;
+                   background: var(--accent); color: #fff; cursor: pointer; }
+  button.secondary { font: inherit; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+                     border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+  button.secondary.chosen { border-color: var(--accent); color: var(--accent); }
+  .note { color: var(--ink-2); font-size: 13px; }
+  .big { font-size: 40px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .chip { display: inline-block; padding: 3px 10px; border-radius: 999px; font-weight: 600; font-size: 14px; }
+  .approve { background: var(--good-soft); color: var(--good); }
+  .review { background: var(--warn-soft); color: var(--warn); }
+  .block { background: var(--bad-soft); color: var(--bad); }
+  .low { background: var(--good-soft); color: var(--good); }
+  .medium { background: var(--warn-soft); color: var(--warn); }
+  .high { background: var(--bad-soft); color: var(--bad); }
+  .summary { display: flex; gap: 28px; align-items: flex-end; flex-wrap: wrap; }
+  .summary .label { color: var(--ink-2); font-size: 13px; }
+  .scale { position: relative; height: 56px; margin-top: 18px; }
+  .scale .track { position: absolute; top: 20px; left: 0; right: 0; height: 8px; border-radius: 4px;
+                  background: linear-gradient(90deg, var(--good-soft) 0 50%, var(--warn-soft) 50% 84.9%, var(--bad-soft) 84.9% 100%); }
+  .scale .mark { position: absolute; top: 14px; width: 2px; height: 20px; background: var(--ink-3); }
+  .scale .mark span { position: absolute; top: 22px; left: 50%; transform: translateX(-50%);
+                      font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+  .scale .dot { position: absolute; top: 12px; width: 4px; height: 24px; margin-left: -2px; border-radius: 2px;
+                background: var(--ink); box-shadow: 0 0 0 2px var(--surface); }
+  .scale .dot span { position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%);
+                     font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .bars { display: flex; flex-direction: column; gap: 10px; }
+  .bar { display: grid; grid-template-columns: 80px 1fr 96px; gap: 10px; align-items: center; }
+  .bar .name { color: var(--ink-2); }
+  .bar .track { height: 14px; }
+  .bar .fill { height: 14px; border-radius: 0 4px 4px 0; background: var(--bar); min-width: 2px; }
+  .bar.best .fill { background: var(--accent); }
+  .bar.best .name, .bar.best .value { color: var(--ink); font-weight: 600; }
+  .bar .value { text-align: right; font-variant-numeric: tabular-nums; }
+  .formula { margin-top: 12px; font-size: 13px; color: var(--ink-2); }
+  .formula code { font-size: 12px; }
+  .truth { padding: 12px 14px; border-radius: 8px; border: 1px solid var(--line); }
+  .truth .title { font-weight: 700; font-size: 18px; }
+  .notice { background: var(--warn-soft); color: var(--ink); padding: 10px 12px; border-radius: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Simulador de pagos</h1>
+  <p class="subtitle">Pagos reales de la producción simulada (enero–junio de 2026), puntuados en directo por la API con el modelo congelado.</p>
+</header>
+<main>
+  <section class="panel">
+    <h2>1 · Elige un pago</h2>
+    <div class="list" id="cases"><span class="note">Cargando pagos…</span></div>
+  </section>
+
+  <section class="steps">
+    <div class="panel step" id="step-payment">
+      <h3><span class="n">1</span>El pago llega a la API</h3>
+      <p class="note" id="no-payment">Elige un pago de la lista.</p>
+      <div id="payment" class="hidden">
+        <table id="payment-table"></table>
+        <div class="row">
+          <span>¿Crees que es fraude?</span>
+          <button class="secondary bet" data-value="yes">Sí</button>
+          <button class="secondary bet" data-value="no">No</button>
+        </div>
+        <div class="row">
+          <label for="amount">Importe</label>
+          <input type="number" id="amount" min="0.01" step="0.01">
+          <span class="note" id="currency"></span>
+          <button class="primary" id="send">Enviar a la API</button>
+        </div>
+        <p class="note">Puedes cambiar el importe para ver cómo cambia la decisión.</p>
+      </div>
+    </div>
+
+    <div class="panel step hidden" id="step-response">
+      <h3><span class="n">2</span>La API responde</h3>
+      <div id="response"></div>
+    </div>
+
+    <div class="panel step hidden" id="step-features">
+      <h3><span class="n">3</span>Lo que el sistema sabía</h3>
+      <p class="note">Solo historia anterior a este pago. Son 14 de las 50 features que usa el modelo.</p>
+      <table id="features-table"></table>
+    </div>
+
+    <div class="panel step hidden" id="step-costs">
+      <h3><span class="n">4</span>La cuenta: coste esperado de cada acción</h3>
+      <div class="bars" id="bars"></div>
+      <p class="formula" id="formula"></p>
+    </div>
+
+    <div class="panel step hidden" id="step-truth">
+      <h3><span class="n">5</span>La verdad del simulador</h3>
+      <p class="note">El modelo nunca la ve. Decide antes de mirar.</p>
+      <button class="secondary" id="reveal">Revelar la verdad</button>
+      <div id="truth" class="hidden"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const fmt = (x, d = 2) => new Intl.NumberFormat('es-ES', { minimumFractionDigits: d, maximumFractionDigits: d }).format(x);
+const eur = x => fmt(x) + ' €';
+const pct = (x, d = 2) => fmt(100 * x, d) + ' %';
+const DECISION = { approve: 'Aprobar', review: 'Revisar', block: 'Bloquear' };
+const RISK = { low: 'riesgo bajo', medium: 'riesgo medio', high: 'riesgo alto' };
+const CHANNEL = { chip_pin: 'chip y PIN', contactless: 'contactless', ecommerce: 'online', mobile_wallet: 'wallet móvil' };
+let cases = [], current = null, bet = null, last = null;
+
+const el = (tag, attrs = {}, ...children) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) k === 'class' ? e.className = v : e.setAttribute(k, v);
+  for (const c of children) e.append(c);
+  return e;
+};
+const tableRow = (a, b) => el('tr', {}, el('td', {}, a), el('td', {}, b));
+const byId = id => document.getElementById(id);
+
+function display(key, v) {
+  if (v === null || v === undefined) return 'desconocido (sin historia o sin dispositivo)';
+  if (typeof v === 'boolean') return v ? 'sí' : 'no';
+  if (key === 'merchant_fraud_rate_90d_smoothed') return pct(v);
+  if (key === 'payment_method') return CHANNEL[v] || v;
+  if (typeof v === 'number') return Number.isInteger(v) ? fmt(v, 0) : fmt(v);
+  return String(v);
+}
+
+async function loadCases() {
+  cases = await (await fetch('/api/cases')).json();
+  const list = byId('cases');
+  list.replaceChildren();
+  cases.forEach(c => {
+    const p = c.payment;
+    const b = el('button', { class: 'case' },
+      el('div', { class: 'amount' }, `${fmt(p.amount)} ${p.currency}`),
+      el('div', { class: 'meta' }, `${CHANNEL[p.payment_method] || p.payment_method} · ${c.merchant_category} · ${p.country}`),
+      el('div', { class: 'meta' }, new Date(p.timestamp).toLocaleString('es-ES', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }) + ' UTC'));
+    b.onclick = () => choose(c, b);
+    list.append(b);
+  });
+}
+
+function choose(c, button) {
+  current = c; bet = null; last = null;
+  document.querySelectorAll('.case').forEach(x => x.classList.remove('active'));
+  button.classList.add('active');
+  document.querySelectorAll('.bet').forEach(x => x.classList.remove('chosen'));
+  byId('no-payment').classList.add('hidden');
+  byId('payment').classList.remove('hidden');
+  const p = c.payment;
+  byId('payment-table').replaceChildren(
+    tableRow('Cliente', p.customer_id), tableRow('Tarjeta', p.card_id),
+    tableRow('Comercio', `${p.merchant_id} (${c.merchant_category})`), tableRow('Fecha', p.timestamp),
+    tableRow('País del pago', p.country), tableRow('Canal', CHANNEL[p.payment_method] || p.payment_method),
+    tableRow('Dispositivo', p.device_id || 'ninguno (pago presencial)'));
+  byId('amount').value = p.amount;
+  byId('currency').textContent = p.currency;
+  ['step-response', 'step-features', 'step-costs', 'step-truth'].forEach(id => byId(id).classList.add('hidden'));
+}
+
+document.querySelectorAll('.bet').forEach(b => b.onclick = () => {
+  bet = b.dataset.value;
+  document.querySelectorAll('.bet').forEach(x => x.classList.toggle('chosen', x === b));
+});
+
+byId('send').onclick = async () => {
+  if (!current) return;
+  const button = byId('send');
+  button.disabled = true; button.textContent = 'Enviando…';
+  const amount = parseFloat(byId('amount').value);
+  try {
+    const r = await (await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ case: current.id, amount }) })).json();
+    show(r);
+  } finally {
+    button.disabled = false; button.textContent = 'Enviar a la API';
+  }
+};
+
+function show(r) {
+  const box = byId('response');
+  byId('step-response').classList.remove('hidden');
+  box.replaceChildren();
+  if (r.status !== 200) {
+    ['step-features', 'step-costs', 'step-truth'].forEach(id => byId(id).classList.add('hidden'));
+    box.append(el('div', { class: 'notice' },
+      r.status === 502 ? `No se pudo enviar el pago: ${r.detail}. Comprueba que la API está arrancada y vuelve a pulsar «Enviar a la API».`
+                       : `La API respondió ${r.status} en ${fmt(r.ms, 0)} ms: ${r.detail}. `,
+      r.status === 503 ? 'La historia de este cliente no estaba en la caché de la base de datos y la consulta superó el límite de tiempo de la API. En un banco se aplicaría la regla por defecto. Pulsa «Enviar a la API» otra vez.' : ''));
+    return;
+  }
+  last = r;
+  const answer = r.response, q = answer.fraud_probability;
+  box.append(
+    el('div', { class: 'summary' },
+      el('div', {}, el('div', { class: 'label' }, 'Probabilidad de fraude'), el('div', { class: 'big' }, pct(q, q < 0.01 ? 3 : 2))),
+      el('div', {}, el('div', { class: 'label' }, 'Nivel de riesgo'), el('span', { class: 'chip ' + answer.risk_level }, RISK[answer.risk_level])),
+      el('div', {}, el('div', { class: 'label' }, 'Decisión'), el('span', { class: 'chip ' + answer.decision }, DECISION[answer.decision])),
+      el('div', {}, el('div', { class: 'label' }, 'Tiempo de respuesta'), el('div', {}, fmt(r.ms, 0) + ' ms'))),
+    scale(q, r.risk_levels));
+
+  byId('features-table').replaceChildren(...r.features.map(f => tableRow(f.label, display(f.key, f.value))));
+  byId('step-features').classList.remove('hidden');
+
+  const c = r.costs, max = Math.max(c.approve, c.review, c.block);
+  const best = Object.entries(c).sort((a, b) => a[1] - b[1])[0][0];
+  byId('bars').replaceChildren(...['approve', 'review', 'block'].map(k => {
+    const fill = el('div', { class: 'fill' });
+    fill.style.width = (100 * c[k] / max) + '%';
+    return el('div', { class: 'bar' + (k === best ? ' best' : '') },
+      el('div', { class: 'name' }, DECISION[k]),
+      el('div', { class: 'track' }, fill),
+      el('div', { class: 'value' }, eur(c[k])));
+  }));
+  const m = r.cost_model, n = v => new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 }).format(v);
+  byId('formula').replaceChildren(
+    `Con p = ${pct(q, 3)} e importe = ${eur(r.amount_eur)}, la más barata es `, el('strong', {}, DECISION[best].toLowerCase()), '. ',
+    el('br'), el('code', {}, `aprobar = p × (importe + ${n(m.chargeback_fee)} €)`), ' · ',
+    el('code', {}, `revisar = ${n(m.review_cost)} € + p × ${n(100 * (1 - m.reviewer_recall))} % × (importe + ${n(m.chargeback_fee)} €) + (1 − p) × ${n(m.review_friction)} €`), ' · ',
+    el('code', {}, `bloquear = (1 − p) × (${n(100 * m.lost_margin_rate)} % del importe + ${n(m.block_friction)} €)`));
+  byId('step-costs').classList.remove('hidden');
+
+  byId('step-truth').classList.remove('hidden');
+  byId('truth').classList.add('hidden');
+  byId('reveal').classList.remove('hidden');
+}
+
+function scale(q, levels) {
+  // logarithmic, from 0.01 % to 100 %
+  const x = v => Math.min(100, Math.max(0, (Math.log10(v) + 4) / 4 * 100));
+  const box = el('div', { class: 'scale' }, el('div', { class: 'track' }));
+  for (const [v, text] of [[levels.medium, 'medio desde ' + pct(levels.medium, 0)], [levels.high, 'alto desde ' + pct(levels.high, 0)]]) {
+    const m = el('div', { class: 'mark' }, el('span', {}, text));
+    m.style.left = x(v) + '%';
+    box.append(m);
+  }
+  const dot = el('div', { class: 'dot' }, el('span', {}, 'este pago'));
+  dot.style.left = x(Math.max(q, 1e-4)) + '%';
+  box.append(dot);
+  return box;
+}
+
+byId('reveal').onclick = () => {
+  if (!last) return;
+  const t = last.truth, d = last.response.decision;
+  let verdict;
+  if (t.is_fraud) verdict = d === 'approve' ? 'El modelo NO lo detectó.' : `Detectado: la decisión fue ${DECISION[d].toLowerCase()}.`;
+  else verdict = { approve: 'Correcto: legítimo y aprobado, sin molestar al cliente.',
+                   review: 'Era legítimo y se revisa: con mucho dinero en juego, una revisión de 4 € compensa aunque el riesgo sea bajo.',
+                   block: 'Falso positivo: un cliente legítimo bloqueado.' }[d];
+  byId('truth').replaceChildren(el('div', { class: 'truth' },
+    el('div', { class: 'title' }, t.title), el('p', {}, t.explanation), el('p', {}, el('strong', {}, verdict)),
+    bet ? el('p', { class: 'note' }, (bet === 'yes') === t.is_fraud ? 'Tu apuesta: acertaste.' : 'Tu apuesta: fallaste.') : '',
+    t.amount_changed ? el('p', { class: 'note' }, 'Has cambiado el importe: la verdad es la del pago original.') : ''));
+  byId('truth').classList.remove('hidden');
+  byId('reveal').classList.add('hidden');
+};
+
+loadCases();
+</script>
+</body>
+</html>

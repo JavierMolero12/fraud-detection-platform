@@ -286,6 +286,7 @@ ALLOWED = {
     "monitoring/evaluation.py",  # judges the alerts with it, afterwards
     "quality/report.py",  # recall of each data quality rule vs the injected defects (Phase 3)
     "sql/evaluation/",  # same, in SQL
+    "serving/simulator.py",  # the demo page reveals it after the API's answer, never before
 }
 
 
