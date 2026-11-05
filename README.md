@@ -4,8 +4,8 @@ End-to-end fraud risk scoring system built around the problems that make fraud d
 practice: temporal leakage, delayed labels, extreme class imbalance, cost-sensitive decisions,
 calibration and drift.
 
-> **Status:** work in progress. Phase 9 of 14 (error analysis + interpretability).
-> No model results exist yet; this README will only report numbers produced by real runs.
+> **Status:** work in progress. Phase 10 of 14 (real-time API + batch scoring).
+> Every number in the reports comes from a recorded run.
 
 ## Design
 
@@ -34,10 +34,46 @@ fraud models tune                  # temporal CV, tuning, leakage experiments (~
 fraud policy optimise              # calibration + cost-based policy on validation
 fraud policy evaluate-test         # the ONE evaluation on the test period
 fraud analyse validation           # explanations, error and segment analysis (~17 min)
+fraud serve batch                  # score the production period: CSV + scoring.predictions
+fraud serve api                    # real-time API on http://127.0.0.1:8000 (docs at /docs)
+fraud serve bench                  # latency and throughput of the real API
 ```
+
+The API and the batch job load the frozen bundle written by `fraud policy optimise`
+(`data/processed/phase8/`, not in git; override with `FRAUD_BUNDLE_DIR`).
 
 Scales: `tiny` (tests), `small` (development, ~48k transactions), `full` (~2.9M transactions).
 Reports of the full dataset: [simulation](reports/simulation/v1.0.1-full.md), [data quality](reports/data_quality/dq_report.md).
+
+## Real-time API
+
+`fraud serve api` starts the service. `POST /predict` takes a payment as the authorisation
+system sends it (before it reaches the database) and returns a calibrated probability, a risk
+level and the decision with the lowest expected cost for that amount:
+
+```bash
+curl -s http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d '{
+  "transaction_id": "demo-0001", "customer_id": "C0024210", "card_id": "K00038141",
+  "merchant_id": "M0001305", "timestamp": "2026-06-30T07:43:24+00:00",
+  "amount": 8598.49, "currency": "EUR", "country": "IT",
+  "payment_method": "ecommerce", "device_id": "D8949a4286eec"}'
+```
+
+```json
+{"transaction_id": "demo-0001", "fraud_probability": 0.0020404363442641077,
+ "risk_level": "low", "decision": "review", "model_version": "fcf88c67457e",
+ "policy_version": "65a2111fa8c2", "scoring_timestamp": "2026-10-26T12:15:00.187080Z"}
+```
+
+A 0.2% risk is "low", but on €8,598 a review is cheaper than the expected loss: the risk level
+is for display, the decision comes from the cost policy. The ids exist in the full simulated
+dataset. Invalid or unknown inputs get a 422; a retried `transaction_id` returns the decision
+already made. `GET /health` and `GET /model` (versions, policy, training period, lineage) are
+also available, and the interactive docs are at `/docs`.
+
+Measured on a laptop: ~49 ms per request one at a time (p50), ~100 requests/s with several
+processes; online features are identical, bit for bit, to the training features. Details:
+[serving findings](reports/serving/phase10_findings.md).
 
 ## Pipeline so far
 
@@ -53,6 +89,7 @@ Reports of the full dataset: [simulation](reports/simulation/v1.0.1-full.md), [d
 | Temporal CV, tuning, H7/H8 | `fraud models tune` | `models/validation.py`, `models/tuning.py`, [findings](reports/models/phase7_findings.md) |
 | Calibration, cost model, policy, test | `fraud policy optimise`, `fraud policy evaluate-test` | `src/fraudplatform/decision/`, [policy](reports/policy/policy_v1.json), [findings](reports/policy/phase8_findings.md) |
 | Error analysis, explanations, model card | `fraud analyse validation` | `src/fraudplatform/analysis/`, [findings](reports/analysis/phase9_findings.md), [model card](reports/model_card.md) |
+| Real-time API, batch scoring | `fraud serve api`, `fraud serve batch` | `src/fraudplatform/serving/`, `sql/features/online/`, [findings](reports/serving/phase10_findings.md) |
 
 ## Tests
 

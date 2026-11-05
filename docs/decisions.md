@@ -421,3 +421,87 @@ explicaciones individuales).
 **Consecuencias.** Explicar 900 transacciones cuesta ~4 minutos. Para la API (Fase 10),
 explicar cada predicción en tiempo real sería caro: se valorará devolver solo las 3 variables
 principales o explicar bajo demanda.
+
+---
+
+## 024 — Paridad online/offline exacta (bit a bit) de la entrada del modelo
+
+**Contexto.** La decisión 017 deja dos implementaciones de las 50 features. El primer test de
+paridad comparaba con tolerancia relativa 1e-9 y pasaba, pero la API y el batch daban una
+probabilidad distinta para 1 de cada 150 transacciones (0,000732 frente a 0,000878 en el
+caso encontrado). Dos causas, ambas de último dígito:
+
+- el parser de floats por defecto de `pandas.read_csv`, con el que se construyeron los datos de
+  entrenamiento y el batch, no redondea correctamente: `0.002707006369426752` se lee 1 ulp
+  más abajo;
+- el SQL online calculaba algunas features con otros tipos (`ln()` sobre float8 en vez de
+  numeric; parámetros sin tipo que PostgreSQL trata como numeric en vez de float8).
+
+Un ulp importa porque los umbrales de los árboles caen exactamente sobre valores repetidos del
+entrenamiento (por ejemplo, la tasa suavizada de un comercio, compartida por muchas
+transacciones), y un valor 1 ulp por encima cambia de rama.
+
+**Decisión.** La API lee sus features con la misma función que el entrenamiento y el batch
+(COPY → CSV → pandas, `eda.data.query_features`), y el SQL online convierte cada parámetro y
+cada valor intermedio al mismo tipo que el SQL offline. El test de paridad exige igualdad exacta
+de las 50 entradas del modelo, y otro test exige que la probabilidad de la API sea la del batch.
+
+**Alternativas.** Leer con `float_precision="round_trip"` en todas partes (lo correcto, pero
+cambia las entradas del modelo congelado: obliga a reentrenar y revalidar); paridad con
+tolerancia (lo que falló); redondear las features (cambia el modelo).
+
+**Consecuencias.** 0 diferencias en 76.950 valores (1.539 transacciones de producción, base de
+datos completa) y probabilidades idénticas entre API y batch. En el próximo reentrenamiento,
+cambiar los dos caminos a `round_trip` a la vez.
+
+---
+
+## 025 — Decisión online: capacidad de revisión con lock, idempotencia y tipo de cambio
+
+**Contexto.** El batch reparte las revisiones de un día entero por beneficio; la API decide una
+a una. Dos peticiones simultáneas podrían ver "59 de 60" y revisar las dos. El sistema de
+autorización reintenta: un reintento no debe puntuar ni gastar una revisión dos veces. En los
+datos simulados los tipos de cambio terminan el 2026-06-30, y la consulta por día exacto
+rechazaba cualquier pago posterior, incluso en EUR.
+
+**Decisión.**
+- Capacidad en orden de llegada: se revisa si revisar es lo más barato y quedan huecos hoy; si
+  no, la mejor alternativa (aprobar o bloquear). Contar y registrar van en una transacción con
+  `pg_advisory_xact_lock` por día UTC, solo para pagos cuya mejor acción es revisar.
+- Idempotencia: índice único sobre `transaction_id` de la API; un reintento devuelve la
+  decisión ya registrada (aunque el cuerpo cambie).
+- Tipo de cambio: EUR sin consulta; el resto, el último tipo publicado hasta ese día UTC, y 422
+  si tiene más de 7 días. Cliente, tarjeta, comercio o país desconocidos → 422: el pago no se
+  puede puntuar y el sistema de autorización aplica su regla de respaldo.
+
+**Alternativas.** Reservar huecos por volumen esperado del día (necesita una previsión);
+decidir al final del día (imposible en autorización); contador en Redis (otro servicio).
+
+**Consecuencias.** Con la política de la Fase 8 la capacidad no se ha alcanzado nunca (máximo 41
+de 60 en el batch de producción), así que API y batch deciden lo mismo. Un test lanza 10 pagos
+simultáneos con 3 huecos y obtiene exactamente 3 revisiones. Si la capacidad llegara a limitar,
+el orden de llegada sería peor que el reparto del batch: revisiones mediocres de la mañana
+podrían quitar el hueco a otras mejores de la tarde. Se vigilará en la Fase 12.
+
+---
+
+## 026 — El servicio escala con procesos; explicaciones fuera de la ruta de la petición
+
+**Contexto.** El trabajo de Python por petición (leer las features, la predicción de 400
+árboles para una fila, ~9 ms, y la validación) retiene el GIL: en un solo proceso, varios hilos
+no aumentan el rendimiento (medido en `reports/serving/phase10_findings.md`). Limitar los
+hilos de OpenMP no cambia la latencia de una fila (8,8 frente a 8,9 ms). La decisión 023 dejaba
+abierto explicar cada predicción: con `PermutationExplainer` cuesta ~0,27 s por transacción.
+
+**Decisión.** Escalar con procesos (réplicas o workers detrás de un balanceador) y un hilo de
+OpenMP por proceso. `/predict` no devuelve explicaciones: las features registradas en
+`scoring.predictions.features` permiten explicar cualquier decisión después, offline o con un
+endpoint bajo demanda.
+
+**Alternativas.** Compilar el modelo (treelite, ONNX) para bajar los ~9 ms; agrupar peticiones
+(micro-batching); endpoints async (no ayudan con trabajo de CPU).
+
+**Consecuencias.** En esta máquina Windows, `uvicorn --workers N` falla al arrancar algunos
+workers (`WinError 10022` al compartir el socket); el benchmark arranca procesos independientes
+en puertos consecutivos y reparte las peticiones como un balanceador. En Docker (Linux, Fase 11)
+se usará `--workers`.

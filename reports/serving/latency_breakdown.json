@@ -1,0 +1,49 @@
+{
+  "payments": 500,
+  "period": [
+    "2026-01-01",
+    "2026-07-01"
+  ],
+  "steps_ms": {
+    "idempotency_check": {
+      "p50": 0.66,
+      "p95": 1.18,
+      "share_of_mean_total": 0.017
+    },
+    "exchange_rate": {
+      "p50": 0.01,
+      "p95": 0.56,
+      "share_of_mean_total": 0.003
+    },
+    "features_sql": {
+      "p50": 25.8,
+      "p95": 33.21,
+      "share_of_mean_total": 0.634
+    },
+    "prepare": {
+      "p50": 1.36,
+      "p95": 1.71,
+      "share_of_mean_total": 0.033
+    },
+    "predict_calibrate": {
+      "p50": 9.95,
+      "p95": 11.61,
+      "share_of_mean_total": 0.24
+    },
+    "decide": {
+      "p50": 0.86,
+      "p95": 1.33,
+      "share_of_mean_total": 0.022
+    },
+    "write_log": {
+      "p50": 2.03,
+      "p95": 3.14,
+      "share_of_mean_total": 0.051
+    },
+    "total": {
+      "p50": 41.12,
+      "p95": 49.49,
+      "share_of_mean_total": 1.0
+    }
+  }
+}

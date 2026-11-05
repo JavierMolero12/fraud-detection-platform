@@ -13,6 +13,13 @@ def _with_db(url: str, name: str) -> str:
 
 
 @pytest.fixture(scope="module")
+def db_url() -> str:
+    """URL of the test database, for code that opens its own connections (the API pool)."""
+    base = database_url()
+    return _with_db(base, urlsplit(base).path.lstrip("/") + "_test")
+
+
+@pytest.fixture(scope="module")
 def conn():
     """A fresh, empty test database per test module (never the development database)."""
     base = database_url()
