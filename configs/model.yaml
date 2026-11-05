@@ -1,0 +1,36 @@
+# Modelling configuration (Phase 6: baselines and first models, default hyperparameters).
+# Tuning with temporal cross-validation is Phase 7; nothing here is fitted on validation.
+
+random_state: 42
+
+# Training uses the train split minus the warm-up (decision 016); evaluation uses validation.
+# The test split is not touched until the final evaluation.
+
+evaluation:
+  alert_rate: 0.005        # share of transactions we could flag for review (~4.8x base rate)
+  bootstrap_reps: 200      # day-block bootstrap for confidence intervals
+  bootstrap_seed: 7
+
+# Expert rules (baseline B2). Thresholds come from the EDA and feature analysis on the TRAIN
+# period only. Score = number of rules fired.
+rules:
+  burst_card_txn_1h: 2           # card used >= N times in the previous hour
+  card_testing_micro_1h: 1       # >= N micro-charges in the previous hour, card not present
+  new_device_amount_eur: 200     # new device for the customer AND amount above this
+  device_many_cards_24h: 2       # >= N distinct cards on the device in 24 h
+  risky_categories: [gift_cards, luxury, electronics]   # combined with night hours
+
+models:
+  logistic_regression:
+    C: 1.0
+    max_iter: 2000
+  random_forest:
+    n_estimators: 200
+    min_samples_leaf: 50     # also keeps the saved model at a reasonable size
+    max_features: sqrt
+    max_samples: 0.3         # bootstrap sample per tree: faster, more diverse trees
+  hist_gradient_boosting:
+    learning_rate: 0.05
+    max_iter: 400
+    max_leaf_nodes: 31
+    l2_regularization: 1.0

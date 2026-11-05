@@ -4,7 +4,7 @@ End-to-end fraud risk scoring system built around the problems that make fraud d
 practice: temporal leakage, delayed labels, extreme class imbalance, cost-sensitive decisions,
 calibration and drift.
 
-> **Status:** work in progress. Phase 5 of 14 (temporal feature engineering).
+> **Status:** work in progress. Phase 6 of 14 (baselines + first models).
 > No model results exist yet; this README will only report numbers produced by real runs.
 
 ## Design
@@ -29,6 +29,7 @@ fraud db init                      # creates schemas and tables
 fraud db load data/raw/v1.0.1-small
 fraud dq run                       # rules, quarantine, raw -> core, report
 fraud features build               # 51 point-in-time features (+ leaky variants)
+fraud models compare               # baselines + models, train -> validation, MLflow
 ```
 
 Scales: `tiny` (tests), `small` (development, ~48k transactions), `full` (~2.9M transactions).
@@ -44,6 +45,7 @@ Reports of the full dataset: [simulation](reports/simulation/v1.0.1-full.md), [d
 | Analytical SQL | `psql -f` | `sql/analysis/` |
 | EDA + statistics (train period only) | `jupytext --to ipynb --execute notebooks/02_eda.py` | [`notebooks/02_eda.ipynb`](notebooks/02_eda.ipynb), [findings](reports/eda/eda_findings.md) |
 | Point-in-time features (51) | `fraud features build` | `sql/features/`, [catalog](docs/feature_catalog.md), [findings](reports/features/feature_findings.md) |
+| Baselines vs models | `fraud models compare` | `src/fraudplatform/models/`, [comparison](reports/models/phase6_comparison.md), [findings](reports/models/phase6_findings.md) |
 
 ## Tests
 

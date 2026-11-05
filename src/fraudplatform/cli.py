@@ -16,9 +16,11 @@ app = typer.Typer(no_args_is_help=True, help="Fraud detection platform pipeline.
 db_app = typer.Typer(no_args_is_help=True, help="PostgreSQL schema and loading.")
 dq_app = typer.Typer(no_args_is_help=True, help="Data quality: rules, quarantine, raw -> core.")
 features_app = typer.Typer(no_args_is_help=True, help="Point-in-time feature engineering.")
+models_app = typer.Typer(no_args_is_help=True, help="Baselines, models and evaluation.")
 app.add_typer(db_app, name="db")
 app.add_typer(dq_app, name="dq")
 app.add_typer(features_app, name="features")
+app.add_typer(models_app, name="models")
 log = logging.getLogger("fraudplatform")
 
 
@@ -113,6 +115,38 @@ def features_catalog(
 
     out.write_text(render_markdown(), encoding="utf-8", newline="\n")
     typer.echo(out)
+
+
+@models_app.command("compare")
+def models_compare() -> None:
+    """Fit baselines and models on the train period and compare them on validation (Phase 6)."""
+    from fraudplatform.config import load_feature_config, load_model_config, load_splits
+    from fraudplatform.db import connect
+    from fraudplatform.models.comparison import run_comparison
+    from fraudplatform.models.report import write_report
+    from fraudplatform.models.tracking import lineage_tags
+
+    cfg, feature_cfg, splits = load_model_config(), load_feature_config(), load_splits()
+    with connect() as conn:
+        results, scores = run_comparison(conn, cfg, feature_cfg, splits)
+        tags = lineage_tags(conn)
+    out = PROJECT_ROOT / "data" / "processed" / "phase6"
+    out.mkdir(parents=True, exist_ok=True)
+    scores.to_parquet(out / "validation_scores.parquet", index=False)
+    results.to_csv(out / "results.csv", index=False)
+    context = {
+        "dataset": f"v{tags['simulator_version']} `{tags['dataset_hash'][:12]}…`",
+        "feature set": f"v{tags['feature_set_version']} (build {tags['feature_build_id']})",
+        "code": f"`{tags['git_commit'][:10]}` (dirty: {tags['git_dirty']})",
+    }
+    report = write_report(
+        results,
+        scores,
+        cfg.evaluation.alert_rate,
+        PROJECT_ROOT / "reports" / "models" / "phase6_comparison.md",
+        context,
+    )
+    typer.echo(report)
 
 
 if __name__ == "__main__":

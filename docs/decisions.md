@@ -14,7 +14,7 @@ con una nueva entrada que la sustituya (no se reescribe la historia).
 | 007 | Política de decisión optimizada por coste dependiente del importe | Aceptada (Fase 1) |
 | 008 | Sin SMOTE por defecto | Aceptada (Fase 1) |
 | 009 | Stack mínimo | Aceptada (Fase 1) |
-| 010 | ¿Gradient Boosting como modelo final? | **Pendiente de evidencia (Fase 7)** |
+| 010 | ¿Gradient Boosting como modelo final? | **Pendiente (Fase 7); Fase 6: +0,024 PR-AUC sobre regresión logística** |
 | 011 | Data Quality: rechazar, reparar o avisar | Aceptada (Fase 3) |
 | 012 | Clientes sin país: rechazo en cascada | Aceptada (Fase 3) |
 | 013 | Simulador v1.0.1: corrección de edad mínima | Aceptada (Fase 3) |
@@ -22,6 +22,8 @@ con una nueva entrada que la sustituya (no se reescribe la historia).
 | 015 | EDA solo sobre el periodo de entrenamiento | Aceptada (Fase 4) |
 | 016 | Warm-up de 90 días excluido del entrenamiento | Aceptada (Fase 5) |
 | 017 | Features offline con window functions, online con lookups + test de paridad | Aceptada (Fase 5) |
+| 018 | Sin pesos de clase ni remuestreo | Aceptada (Fase 6) |
+| 019 | Modelos guardados con skops y lista explícita de tipos de confianza | Aceptada (Fase 6) |
 
 ---
 
@@ -291,3 +293,40 @@ pero un build mucho más lento).
 
 **Consecuencias.** Dos implementaciones que pueden divergir: el test de paridad es obligatorio
 en la Fase 10.
+
+---
+
+## 018 — Sin pesos de clase ni remuestreo
+
+**Contexto.** Con un 0,73–0,85% de fraude, la respuesta habitual es `class_weight="balanced"`
+o remuestreo (SMOTE, undersampling).
+
+**Evidencia (validación, Fase 6).** Con pesos balanceados, el PR-AUC no mejora (gradient
+boosting −0,002, no significativo) o empeora (regresión logística −0,046, IC pareado −0,058 a
+−0,035), y las probabilidades medias pasan de 0,0072 (observado 0,0073) a 0,068 y 0,123.
+
+**Decisión.** Entrenar sin pesos ni remuestreo. El desbalance se gestiona en la decisión
+(umbral por coste y capacidad, Fase 8), que necesita probabilidades calibradas.
+
+**Alternativas.** SMOTE: además de distorsionar las probabilidades igual que los pesos, crea
+transacciones sintéticas interpolando entre tarjetas y clientes sin relación.
+
+**Consecuencias.** Las probabilidades del modelo salen ya casi calibradas de media; la Fase 8
+comprueba la calibración por tramos.
+
+---
+
+## 019 — Modelos guardados con skops y lista explícita de tipos de confianza
+
+**Contexto.** MLflow 3 guarda los modelos de scikit-learn con skops. Un pickle puede ejecutar
+código arbitrario al cargarse; skops solo reconstruye tipos que se declaran de confianza.
+
+**Decisión.** Mantener skops y declarar los tipos necesarios en
+`pipelines.SKOPS_TRUSTED_TYPES` (nuestra función `signed_log1p` y tipos internos de
+scikit-learn). Un test comprueba que cada pipeline se guarda, se recarga con esa lista y
+predice exactamente lo mismo.
+
+**Alternativas.** `serialization_format="cloudpickle"`: funciona sin lista, pero cargar un
+modelo pasa a ser ejecutar código de un fichero.
+
+**Consecuencias.** Cualquier transformador nuevo obliga a ampliar la lista; el test lo detecta.
