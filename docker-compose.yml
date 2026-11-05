@@ -1,0 +1,35 @@
+name: fraud-platform   # stable project name, independent of the folder name
+
+services:
+  db:
+    image: postgres:16.4
+    container_name: fraud-db
+    environment:
+      # Local development credentials only (see .env.example).
+      POSTGRES_USER: ${POSTGRES_USER:-fraud}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fraud}
+      POSTGRES_DB: ${POSTGRES_DB:-fraud}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"   # 5433 avoids clashing with a local PostgreSQL
+    # Sized for window-function feature queries over ~3M rows on a 16 GB laptop.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=1GB
+      - -c
+      - work_mem=64MB
+      - -c
+      - maintenance_work_mem=512MB
+      - -c
+      - max_wal_size=4GB
+    shm_size: 1g
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  pgdata:
