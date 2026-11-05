@@ -1,0 +1,18 @@
+# Feature set configuration (Phase 5). Window lengths are part of the feature names
+# (card_txn_count_1h, ...) and live in the SQL; this file holds thresholds and priors.
+
+feature_set_version: "1.0.0"
+
+micro_amount_eur: 5            # card-testing style charges (EDA: < 5 EUR is 2.86% fraud online)
+night_hours: [0, 5]            # local hours, inclusive (EDA: 02-05h reach 5.7-9.4% fraud)
+impossible_speed_kmh: 900      # faster than a commercial flight between country centroids
+
+# Smoothed merchant fraud rate: (reports + strength * prior) / (transactions + strength).
+# The prior is a FIXED constant taken from the train period (EDA base rate 0.848%). It is never
+# recomputed on later data, otherwise validation/test labels would leak into the feature.
+merchant_rate_prior: 0.0085
+merchant_rate_prior_strength: 50
+
+# History needed before profile and novelty features are meaningful. The data starts on
+# 2024-07-01 for everyone, so early transactions look "new" only because history is missing.
+warmup_days: 90
