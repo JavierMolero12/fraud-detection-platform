@@ -104,15 +104,27 @@ Baselines on validation: seven expert rules PR-AUC 0.256 (policy cost €520,946
 - **Leakage regressions**: a future feature that uses unreported labels or a future window
   would look excellent offline (Phase 7: 0.847) and fail in production (0.399).
 
-## Monitoring requirements (detailed in Phase 12)
+## Monitoring (Phase 12)
 
-- **Data drift** on key inputs (amount, payment method mix, cross-border share, device
-  novelty, merchant category mix): PSI per week against the training window.
-- **Prediction drift**: mean predicted probability, share of blocks and reviews per day.
-- **Calibration**: mean predicted vs observed fraud rate, once labels mature (60–90 days).
-- **Performance with delayed labels**: PR-AUC and fraud EUR stopped per month, by segment
-  (card present / contactless separately).
-- **Feature to watch for structural drift**: `merchant_new_for_customer` (still drifting after
-  12 months of history, decision 016).
-- **Retraining triggers**: to be defined in Phase 12 (drift thresholds, PR-AUC floor, fraud
-  rate change).
+Implemented in `fraud monitor run | replay | report` (decision 029). Each weekly run uses only
+the data known on its date. Results:
+[monitoring findings](monitoring/phase12_findings.md), [report](monitoring/monitoring_report.html).
+
+**What each run computes:**
+- **Input and prediction drift:** weekly PSI of the 49 inputs and of the score against the
+  validation period; review and block rates.
+- **Delay-adjusted calibration:** frauds reported so far vs the model's expectation for that
+  delay. On the simulated drift it was the first reliable signal: an alert 67 days after the
+  drift, with no false alarm before it.
+- **Recall on mature cohorts** (about 48 days old): alerted 123 days after the drift.
+
+**Retraining** is recommended when a label alert repeats in two consecutive runs; in the replay,
+74 days after the drift. Input drift alone opens an investigation, not a retraining.
+
+**Known weaknesses:**
+- **PSI ≥ 0.10 against a fixed reference missed the drift**, whose step peaked at 0.075.
+- **Age-like inputs drift by construction:** `device_age_days` alerted every week, and
+  `merchant_new_for_customer` and `account_age_days` drift more slowly.
+- **A rolling reference** (each week against the previous four, PSI ≥ 0.03) is the proposed
+  fix. It was designed post hoc, with 0 false alarms in 22 drift-free weeks, but is not
+  validated on a second drift yet.

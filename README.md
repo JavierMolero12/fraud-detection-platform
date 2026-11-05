@@ -4,7 +4,7 @@ End-to-end fraud risk scoring system built around the problems that make fraud d
 practice: temporal leakage, delayed labels, extreme class imbalance, cost-sensitive decisions,
 calibration and drift.
 
-> **Status:** work in progress. Phase 11 of 14 (Docker + tests + CI).
+> **Status:** work in progress. Phase 12 of 14 (monitoring + drift).
 > Every number in the reports comes from a recorded run.
 
 ## Design
@@ -38,6 +38,8 @@ fraud serve batch                  # score the production period: CSV + scoring.
 fraud serve api                    # real-time API on http://127.0.0.1:8000 (docs at /docs)
 fraud serve bench                  # latency and throughput of the real API
 fraud serve verify-bundle          # this environment reproduces the frozen model's scores
+fraud monitor replay               # weekly monitoring runs since deployment, as of each date
+fraud monitor report               # alerts vs the injected drift: HTML report + tables
 ```
 
 The API and the batch job load the frozen bundle written by `fraud policy optimise`
@@ -115,6 +117,7 @@ processes; online features are identical, bit for bit, to the training features.
 | Error analysis, explanations, model card | `fraud analyse validation` | `src/fraudplatform/analysis/`, [findings](reports/analysis/phase9_findings.md), [model card](reports/model_card.md) |
 | Real-time API, batch scoring | `fraud serve api`, `fraud serve batch` | `src/fraudplatform/serving/`, `sql/features/online/`, [findings](reports/serving/phase10_findings.md) |
 | Docker images, CI end to end | `docker compose`, GitHub Actions | `Dockerfile`, `docker/`, `.github/workflows/ci.yml`, [findings](reports/deployment/phase11_findings.md) |
+| Monitoring: drift, delayed labels, alerts | `fraud monitor replay`, `fraud monitor report` | `src/fraudplatform/monitoring/`, `configs/monitoring.yaml`, [findings](reports/monitoring/phase12_findings.md), [report](reports/monitoring/monitoring_report.html) |
 
 ## Tests
 
