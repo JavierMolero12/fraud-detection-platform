@@ -1,0 +1,125 @@
+{
+  "calibration_heldout_month": {
+    "none": {
+      "brier": 0.0023313196189891465,
+      "log_loss": 0.012259396705199465,
+      "ece": 0.00034642016193521514,
+      "mean_predicted": 0.007510138316715331,
+      "observed_rate": 0.007354374073289557,
+      "pr_auc": 0.7897152230312258
+    },
+    "platt": {
+      "brier": 0.0023352038180363545,
+      "log_loss": 0.012257400560267136,
+      "ece": 0.00047475584986396294,
+      "mean_predicted": 0.007482367005499908,
+      "observed_rate": 0.007354374073289557,
+      "pr_auc": 0.7897152230312258
+    },
+    "isotonic": {
+      "brier": 0.002343982954347804,
+      "log_loss": 0.012648730865097657,
+      "ece": 0.0005199198296330011,
+      "mean_predicted": 0.007519949080919518,
+      "observed_rate": 0.007354374073289557,
+      "pr_auc": 0.78510700885006
+    }
+  },
+  "calibration_chosen": "platt",
+  "validation_raw_pr_auc": 0.7920931392620824,
+  "policies_validation": {
+    "approve_all": {
+      "total_cost_eur": 946615.8300000001,
+      "cost_per_1000_txn": 2635.198012360114,
+      "blocked": 0,
+      "reviewed": 0,
+      "reviews_per_day_mean": 0.0,
+      "reviews_per_day_max": 0,
+      "fraud_blocked": 0,
+      "fraud_reviewed": 0,
+      "fraud_approved": 2608,
+      "legit_blocked": 0,
+      "false_decline_rate": 0.0,
+      "fraud_eur_stopped_share": 0.0,
+      "days": 92
+    },
+    "rules (1 rule: review, 2+: block)": {
+      "total_cost_eur": 520945.83819999994,
+      "cost_per_1000_txn": 1450.2139029007292,
+      "blocked": 1113,
+      "reviewed": 5520,
+      "reviews_per_day_mean": 60.0,
+      "reviews_per_day_max": 60,
+      "fraud_blocked": 795,
+      "fraud_reviewed": 437,
+      "fraud_approved": 1376,
+      "legit_blocked": 318,
+      "false_decline_rate": 0.0008917254607248214,
+      "fraud_eur_stopped_share": 0.48362564266548747,
+      "days": 92
+    },
+    "P1 thresholds": {
+      "total_cost_eur": 63741.7926,
+      "cost_per_1000_txn": 177.4449991648572,
+      "blocked": 2651,
+      "reviewed": 755,
+      "reviews_per_day_mean": 8.206521739130435,
+      "reviews_per_day_max": 16,
+      "fraud_blocked": 2124,
+      "fraud_reviewed": 89,
+      "fraud_approved": 395,
+      "legit_blocked": 527,
+      "false_decline_rate": 0.0014777965968615751,
+      "fraud_eur_stopped_share": 0.9488600283705987,
+      "days": 92
+    },
+    "P2 expected cost": {
+      "total_cost_eur": 62925.3114,
+      "cost_per_1000_txn": 175.17207115416736,
+      "blocked": 2513,
+      "reviewed": 1279,
+      "reviews_per_day_mean": 13.902173913043478,
+      "reviews_per_day_max": 24,
+      "fraud_blocked": 2058,
+      "fraud_reviewed": 121,
+      "fraud_approved": 429,
+      "legit_blocked": 455,
+      "false_decline_rate": 0.0012758964925465213,
+      "fraud_eur_stopped_share": 0.9524797155266266,
+      "days": 92
+    }
+  },
+  "p1": {
+    "type": "thresholds",
+    "t_review": 0.04382,
+    "t_block": 0.25
+  },
+  "deployed": "P2 expected cost",
+  "breakeven_examples": {
+    "5": {
+      "approve_review": 0.2631578947368421,
+      "review_block": 0.45945945945945943,
+      "approve_block": 0.33554817275747506
+    },
+    "20": {
+      "approve_review": 0.15384615384615385,
+      "review_block": 0.4186046511627908,
+      "approve_block": 0.2290748898678414
+    },
+    "100": {
+      "approve_review": 0.04784688995215311,
+      "review_block": 0.3111111111111111,
+      "approve_block": 0.09448818897637795
+    },
+    "200": {
+      "approve_review": 0.02570694087403599,
+      "review_block": 0.2608695652173913,
+      "approve_block": 0.0611353711790393
+    },
+    "1000": {
+      "approve_review": 0.005467468562055768,
+      "review_block": 0.19157088122605367,
+      "approve_block": 0.028708133971291867
+    }
+  }
+}

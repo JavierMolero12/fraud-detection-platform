@@ -17,10 +17,12 @@ db_app = typer.Typer(no_args_is_help=True, help="PostgreSQL schema and loading."
 dq_app = typer.Typer(no_args_is_help=True, help="Data quality: rules, quarantine, raw -> core.")
 features_app = typer.Typer(no_args_is_help=True, help="Point-in-time feature engineering.")
 models_app = typer.Typer(no_args_is_help=True, help="Baselines, models and evaluation.")
+policy_app = typer.Typer(no_args_is_help=True, help="Calibration, costs and decision policy.")
 app.add_typer(db_app, name="db")
 app.add_typer(dq_app, name="dq")
 app.add_typer(features_app, name="features")
 app.add_typer(models_app, name="models")
+app.add_typer(policy_app, name="policy")
 log = logging.getLogger("fraudplatform")
 
 
@@ -162,6 +164,48 @@ def models_tune() -> None:
     with connect() as conn:
         run_phase7(conn, cfg, feature_cfg, splits, out)
     log.info("phase 7 finished in %.0fs; results in %s", time.perf_counter() - started, out)
+
+
+@policy_app.command("optimise")
+def policy_optimise() -> None:
+    """Calibrate the selected model and choose the decision policy on validation (Phase 8)."""
+    from fraudplatform.config import (
+        load_cost_config,
+        load_feature_config,
+        load_model_config,
+        load_splits,
+    )
+    from fraudplatform.db import connect
+    from fraudplatform.decision.optimise import run_optimisation
+
+    with connect() as conn:
+        run_optimisation(
+            conn,
+            load_model_config(),
+            load_feature_config(),
+            load_cost_config(),
+            load_splits(),
+            PROJECT_ROOT / "data" / "processed" / "phase8",
+        )
+
+
+@policy_app.command("evaluate-test")
+def policy_evaluate_test(
+    force: Annotated[bool, typer.Option(help="Re-run although the test was already used")] = False,
+) -> None:
+    """Score the frozen model + policy on the test period. Runs ONCE (see test_evaluation.py)."""
+    from fraudplatform.config import load_model_config, load_splits
+    from fraudplatform.db import connect
+    from fraudplatform.decision.test_evaluation import evaluate_on_test
+
+    with connect() as conn:
+        evaluate_on_test(
+            conn,
+            load_model_config(),
+            load_splits(),
+            PROJECT_ROOT / "data" / "processed" / "phase8",
+            force=force,
+        )
 
 
 if __name__ == "__main__":

@@ -25,6 +25,8 @@ con una nueva entrada que la sustituya (no se reescribe la historia).
 | 018 | Sin pesos de clase ni remuestreo | Aceptada (Fase 6) |
 | 019 | Modelos guardados con skops y lista explícita de tipos de confianza | Aceptada (Fase 6) |
 | 020 | Modelo seleccionado por CV temporal; validación solo confirma | Aceptada (Fase 7) |
+| 021 | Política por coste esperado por transacción (P2) | Aceptada (Fase 8) |
+| 022 | El test se evalúa una sola vez y queda registrado en el repositorio | Aceptada (Fase 8) |
 
 ---
 
@@ -357,3 +359,41 @@ en otro conjunto de entrenamiento).
 
 **Consecuencias.** La variación entre meses (0,759 a 0,825 en CV) es mayor que cualquier
 ganancia de tuning: la incertidumbre por mes debe aparecer en los informes y en el monitoring.
+
+---
+
+## 021 — Política por coste esperado por transacción (P2)
+
+**Contexto.** Dos formas de convertir la probabilidad en decisión: umbrales globales
+(P1: revisar si p ≥ 4,4%, bloquear si p ≥ 25%) o elegir para cada transacción la acción de
+menor coste esperado dado p y el importe (P2).
+
+**Evidencia (validación).** P2 €62.925, P1 €63.742, bloquear si p ≥ 0,5 €95.162, reglas
+€520.946, aprobar todo €946.616. En test, P2 €64.098 y P1 €66.962.
+
+**Decisión.** Desplegar P2. Usa el importe (un pago de €1.000 merece revisión con p = 0,55%,
+uno de €5 no hasta p = 26%) y se adapta solo si cambian los costes.
+
+**Alternativas.** P1 es más fácil de explicar y solo un 1,3% más cara en validación; sería la
+opción si negocio necesitara umbrales fijos y comunicables.
+
+**Consecuencias.** P2 necesita probabilidades calibradas: la calibración pasa a ser un
+requisito vigilado en monitoring, no un detalle.
+
+---
+
+## 022 — El test se evalúa una sola vez y queda registrado en el repositorio
+
+**Contexto.** Si el test se mira, se ajusta algo y se vuelve a mirar, deja de ser una
+estimación honesta del rendimiento futuro: se convierte en otro conjunto de validación.
+
+**Decisión.** La política, el calibrador y los hashes del modelo se congelan y se suben al
+repositorio antes de evaluar (`32ce00c`). La evaluación (`fraud policy evaluate-test`) escribe
+`reports/policy/test_evaluation.json`, que también se sube (`3b95790`); si ese fichero existe,
+el comando se niega a ejecutarse otra vez salvo con `--force`, que debe justificarse aquí.
+
+**Resultado.** PR-AUC 0,752 en test frente a 0,792 en validación; coste de la política
+€64.098 frente a €946.956 de aprobar todo. Se publica tal cual.
+
+**Consecuencias.** El historial de git demuestra el orden: primero la política congelada,
+después el test.
