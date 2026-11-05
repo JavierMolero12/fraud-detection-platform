@@ -20,9 +20,9 @@ import psycopg
 
 from fraudplatform.config import FeatureConfig, ModelConfig, Splits
 from fraudplatform.eda.data import load_features
-from fraudplatform.features.catalog import CATEGORICAL
 from fraudplatform.models import baselines, pipelines
 from fraudplatform.models.metrics import evaluate
+from fraudplatform.models.pipelines import prepare
 from fraudplatform.models.tracking import experiment_id, lineage_tags
 
 log = logging.getLogger(__name__)
@@ -74,14 +74,6 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         "balanced",
     ),
 )
-
-
-def prepare(df: pd.DataFrame) -> pd.DataFrame:
-    """Categoricals as plain strings so that encoders see the same values in every split."""
-    df = df.copy()
-    for col in CATEGORICAL:
-        df[col] = df[col].astype(str)
-    return df
 
 
 def training_start(splits: Splits, feature_cfg: FeatureConfig):

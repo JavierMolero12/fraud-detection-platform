@@ -4,7 +4,7 @@ End-to-end fraud risk scoring system built around the problems that make fraud d
 practice: temporal leakage, delayed labels, extreme class imbalance, cost-sensitive decisions,
 calibration and drift.
 
-> **Status:** work in progress. Phase 10 of 14 (real-time API + batch scoring).
+> **Status:** work in progress. Phase 11 of 14 (Docker + tests + CI).
 > Every number in the reports comes from a recorded run.
 
 ## Design
@@ -16,12 +16,12 @@ The design documents are currently in Spanish; they will be translated in the do
 
 ## Quickstart
 
-Requirements: Python 3.11+, Docker.
+Requirements: Python 3.11+, Docker. Everything below also runs in containers (next section).
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"              # add ,analysis for notebooks
+pip install -e ".[train,dev]"        # train: MLflow, SHAP, matplotlib; add ,analysis for notebooks
 
 fraud simulate --scale small       # writes data/raw/v<version>-small/
 docker compose up -d db            # PostgreSQL 16 on localhost:5433
@@ -37,6 +37,7 @@ fraud analyse validation           # explanations, error and segment analysis (~
 fraud serve batch                  # score the production period: CSV + scoring.predictions
 fraud serve api                    # real-time API on http://127.0.0.1:8000 (docs at /docs)
 fraud serve bench                  # latency and throughput of the real API
+fraud serve verify-bundle          # this environment reproduces the frozen model's scores
 ```
 
 The API and the batch job load the frozen bundle written by `fraud policy optimise`
@@ -44,6 +45,29 @@ The API and the batch job load the frozen bundle written by `fraud policy optimi
 
 Scales: `tiny` (tests), `small` (development, ~48k transactions), `full` (~2.9M transactions).
 Reports of the full dataset: [simulation](reports/simulation/v1.0.1-full.md), [data quality](reports/data_quality/dq_report.md).
+
+## Docker
+
+Two images from one [`Dockerfile`](Dockerfile) (decision 027). Both pin the libraries to the
+versions the model was trained with ([`docker/`](docker/)).
+- `app`: the API and the `fraud serve` commands.
+- `train`: every `fraud` command.
+
+The model bundle is mounted read-only, never copied into an image.
+
+```bash
+docker compose up -d api                              # db + API on http://localhost:8000
+docker compose run --rm jobs features build           # any `fraud` command, in a container
+docker compose run --rm --entrypoint fraud api serve verify-bundle   # the served env vs Phase 8
+```
+
+- **Without the Phase 8 bundle** (it is not in git), train a stand-in on the loaded data:
+  `docker compose run --rm jobs serve demo-bundle`, then start the API with
+  `FRAUD_BUNDLE_HOST_DIR=./data/processed/demo_bundle`. CI does exactly this on the tiny dataset
+  ([`ci.yml`](.github/workflows/ci.yml)).
+- **Settings:** `API_WORKERS` (default 2) and `API_PORT`.
+- **On Linux**, run `jobs` as your user so the files it writes stay yours:
+  `FRAUD_UID=$(id -u) FRAUD_GID=$(id -g)`.
 
 ## Real-time API
 
@@ -90,11 +114,13 @@ processes; online features are identical, bit for bit, to the training features.
 | Calibration, cost model, policy, test | `fraud policy optimise`, `fraud policy evaluate-test` | `src/fraudplatform/decision/`, [policy](reports/policy/policy_v1.json), [findings](reports/policy/phase8_findings.md) |
 | Error analysis, explanations, model card | `fraud analyse validation` | `src/fraudplatform/analysis/`, [findings](reports/analysis/phase9_findings.md), [model card](reports/model_card.md) |
 | Real-time API, batch scoring | `fraud serve api`, `fraud serve batch` | `src/fraudplatform/serving/`, `sql/features/online/`, [findings](reports/serving/phase10_findings.md) |
+| Docker images, CI end to end | `docker compose`, GitHub Actions | `Dockerfile`, `docker/`, `.github/workflows/ci.yml`, [findings](reports/deployment/phase11_findings.md) |
 
 ## Tests
 
 ```bash
 pytest                    # unit tests
 pytest -m integration     # needs `docker compose up -d db`
+pytest -m "integration or not integration" --cov=fraudplatform   # both, with coverage
 ruff check . && ruff format --check .
 ```

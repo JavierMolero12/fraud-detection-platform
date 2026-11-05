@@ -27,8 +27,8 @@ from fraudplatform.decision.costs import APPROVE, CostModel, evaluate_actions, t
 from fraudplatform.decision.optimise import EXPERIMENT, decide, probability_metrics
 from fraudplatform.eda.data import load_features
 from fraudplatform.models import baselines, pipelines
-from fraudplatform.models.comparison import prepare
 from fraudplatform.models.metrics import evaluate
+from fraudplatform.models.pipelines import prepare
 from fraudplatform.models.tracking import experiment_id, lineage_tags
 
 log = logging.getLogger(__name__)

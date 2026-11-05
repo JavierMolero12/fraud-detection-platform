@@ -21,7 +21,7 @@ from psycopg.types.json import Jsonb
 
 from fraudplatform.decision.costs import ACTION_NAMES, REVIEW
 from fraudplatform.features.catalog import BOOLEAN, CATEGORICAL, FEATURE_NAMES
-from fraudplatform.models.comparison import prepare
+from fraudplatform.models.pipelines import prepare
 from fraudplatform.serving.online_features import (
     IncomingTransaction,
     OnlineFeatureBuilder,

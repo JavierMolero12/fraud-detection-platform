@@ -44,10 +44,11 @@ LIMIT %s
 """
 
 
-def _payload(row: tuple, run: str) -> dict:
+def payload(row: tuple, prefix: str) -> dict:
+    """A stored payment (SAMPLE row) as an API request, under the id prefix + transaction_id."""
     txid, customer, card, merchant, ts, amount, currency, country, method, device = row
     body = {
-        "transaction_id": f"bench-{run}-{txid}",
+        "transaction_id": f"{prefix}{txid}",
         "customer_id": customer,
         "card_id": card,
         "merchant_id": merchant,
@@ -147,8 +148,8 @@ def _serve(ports: list[int]) -> list[subprocess.Popen]:
     return servers
 
 
-def _concurrent(payloads: list[dict], ports: list[int], threads: int) -> tuple[list, float]:
-    """Client thread i sends to server i % len(ports), on its own keep-alive connection."""
+def _concurrent(payloads: list[dict], urls: list[str], threads: int) -> tuple[list, float]:
+    """Client thread i sends to server i % len(urls), on its own keep-alive connection."""
     local = threading.local()
     ids = iter(range(threads))
     lock = threading.Lock()
@@ -158,7 +159,7 @@ def _concurrent(payloads: list[dict], ports: list[int], threads: int) -> tuple[l
             with lock:
                 i = next(ids)
             local.client = httpx.Client(timeout=60)
-            local.url = f"http://127.0.0.1:{ports[i % len(ports)]}/predict"
+            local.url = f"{urls[i % len(urls)]}/predict"
         r = local.client.post(local.url, json=body)
         r.raise_for_status()
         return r.json()
@@ -182,25 +183,36 @@ def run_bench(
     batch_csv: Path | None = None,
     keep: bool = False,
     repeats: int = 1,
+    url: str | None = None,
 ) -> dict:
     """On a shared machine one run can be distorted (a checkpoint, another busy program), so
     the measurement can be repeated on the same servers: each repetition is reported, plus the
-    median over repetitions."""
+    median over repetitions.
+
+    With `url`, an API that is already running (e.g. the Docker container) is measured
+    instead, and `processes`/`port` are ignored: its worker count is its own configuration.
+    """
     run = uuid.uuid4().hex[:8]
-    per_repeat = n_sequential + n_concurrent * len(processes)
+    if url is None:
+        ports = [port + i for i in range(max(processes))]
+        urls = [f"http://127.0.0.1:{p}" for p in ports]
+        configs = [(n, urls[:n]) for n in processes]
+    else:
+        urls = [url.rstrip("/")]
+        configs = [("external", urls)]
+    per_repeat = n_sequential + n_concurrent * len(configs)
     rows = conn.execute(SAMPLE, (start, end, run, per_repeat * repeats)).fetchall()
-    payloads = [_payload(r, run) for r in rows]
-    ports = [port + i for i in range(max(processes))]
+    payloads = [payload(r, f"bench-{run}-") for r in rows]
     responses: dict[str, dict] = {}
     measured = []  # per repetition: (sequential payloads, client ms, [(n, chunk, seconds)])
 
-    servers = _serve(ports)
+    servers = _serve(ports) if url is None else []
     try:
-        for p in ports:  # warm-up: pool connections, first predictions
+        for i, u in enumerate(urls):  # warm-up: pool connections, first predictions
             with httpx.Client(timeout=60) as client:
                 for body in payloads[:20]:
-                    warm = {**body, "transaction_id": f"{body['transaction_id']}-w{p}"}
-                    client.post(f"http://127.0.0.1:{p}/predict", json=warm).raise_for_status()
+                    warm = {**body, "transaction_id": f"{body['transaction_id']}-w{i}"}
+                    client.post(f"{u}/predict", json=warm).raise_for_status()
 
         for rep in range(repeats):
             batch = payloads[rep * per_repeat : (rep + 1) * per_repeat]
@@ -209,15 +221,15 @@ def run_bench(
             with httpx.Client(timeout=60) as client:
                 for body in sequential:
                     t0 = time.perf_counter()
-                    r = client.post(f"http://127.0.0.1:{ports[0]}/predict", json=body)
+                    r = client.post(f"{urls[0]}/predict", json=body)
                     client_ms.append((time.perf_counter() - t0) * 1000)
                     r.raise_for_status()
                     responses[body["transaction_id"]] = r.json()
             concurrent_runs = []
-            for k, n in enumerate(processes):
+            for k, (n, config_urls) in enumerate(configs):
                 first = n_sequential + k * n_concurrent
                 chunk = batch[first : first + n_concurrent]
-                results, seconds = _concurrent(chunk, ports[:n], threads)
+                results, seconds = _concurrent(chunk, config_urls, threads)
                 responses |= {r["transaction_id"]: r for r in results}
                 concurrent_runs.append((n, chunk, seconds))
             measured.append((sequential, client_ms, concurrent_runs))
@@ -235,7 +247,7 @@ def run_bench(
         {
             "sequential": {
                 "requests": len(sequential),
-                "server_processes": 1,
+                "server_processes": 1 if url is None else "external",
                 "client_ms": _percentiles(client_ms),
                 "server_ms": _percentiles([server_ms[b["transaction_id"]] for b in sequential]),
             },
@@ -255,6 +267,7 @@ def run_bench(
     ]
     result = {
         "run": run,
+        "server": url or "local uvicorn processes started by the benchmark",
         "period": [str(start), str(end)],
         "repeats": repeats,
         "median_over_repeats": _median_over(repetitions),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
@@ -160,3 +161,24 @@ def test_only_the_expected_cost_policy_is_served(tmp_path):
     (tmp_path / "policy.json").write_text(json.dumps({"policy": {"type": "thresholds"}}))
     with pytest.raises(ValueError, match="expected-cost"):
         Bundle.load(tmp_path)
+
+
+# --- server launcher ------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="Linux only: elsewhere Python reads the protocol from the descriptor, and several "
+    "API workers only run on Linux anyway (decision 026)",
+)
+def test_the_listening_socket_is_declared_tcp_so_connections_get_tcp_nodelay():
+    import socket
+
+    from fraudplatform.serving.server import TcpConfig
+
+    sock = TcpConfig("fraudplatform.serving.api:create_app", host="127.0.0.1", port=0).bind_socket()
+    try:
+        assert sock.proto == socket.IPPROTO_TCP  # asyncio sets TCP_NODELAY only in this case
+        assert sock.getsockname()[1] > 0
+    finally:
+        sock.close()

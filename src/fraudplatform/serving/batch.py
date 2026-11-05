@@ -24,7 +24,7 @@ import psycopg
 
 from fraudplatform.decision.costs import ACTION_NAMES, REVIEW
 from fraudplatform.eda.data import load_features
-from fraudplatform.models.comparison import prepare
+from fraudplatform.models.pipelines import prepare
 from fraudplatform.serving.scorer import Scorer
 
 log = logging.getLogger(__name__)

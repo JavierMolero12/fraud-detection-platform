@@ -1,9 +1,21 @@
 name: fraud-platform   # stable project name, independent of the folder name
 
+# db    PostgreSQL 16 (all layers: raw -> core -> features -> scoring)
+# api   the scoring API on the frozen bundle, mounted read-only (image target `app`)
+# jobs  any `fraud` command: simulate, load, data quality, features, models, policy, batch
+#       scoring, checks (image target `train`). Profile "jobs": it only runs on demand:
+#         docker compose run --rm jobs features build
+#
+# A second, isolated stack (CI, or a test next to the dev database):
+#   COMPOSE_PROJECT_NAME=fraud-ci DB_CONTAINER_NAME=fraud-ci-db POSTGRES_PORT=5434 API_PORT=8001
+
+x-database-url: &database-url
+  DATABASE_URL: postgresql://${POSTGRES_USER:-fraud}:${POSTGRES_PASSWORD:-fraud}@db:5432/${POSTGRES_DB:-fraud}
+
 services:
   db:
     image: postgres:16.4
-    container_name: fraud-db
+    container_name: ${DB_CONTAINER_NAME:-fraud-db}
     environment:
       # Local development credentials only (see .env.example).
       POSTGRES_USER: ${POSTGRES_USER:-fraud}
@@ -30,6 +42,45 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+
+  api:
+    build:
+      context: .
+      target: app
+    image: fraudplatform:app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *database-url
+      WEB_CONCURRENCY: ${API_WORKERS:-2}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      # The model bundle is mounted, never baked into the image (decision 027).
+      - ${FRAUD_BUNDLE_HOST_DIR:-./data/processed/phase8}:/app/bundle:ro
+    read_only: true      # the API writes nothing to disk
+    tmpfs:
+      - /tmp
+
+  jobs:
+    build:
+      context: .
+      target: train
+    image: fraudplatform:train
+    profiles: ["jobs"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *database-url
+    # On Linux, run as your own user so files written to the mounts stay yours:
+    #   FRAUD_UID=$(id -u) FRAUD_GID=$(id -g) docker compose run --rm jobs ...
+    user: "${FRAUD_UID:-10001}:${FRAUD_GID:-10001}"
+    volumes:
+      - ${FRAUD_DATA_DIR:-./data}:/app/data
+      - ${FRAUD_REPORTS_DIR:-./reports}:/app/reports
+      - ${FRAUD_MLRUNS_DIR:-./mlruns}:/app/mlruns
 
 volumes:
   pgdata:
