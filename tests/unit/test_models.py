@@ -185,3 +185,20 @@ def test_probability_metrics_only_for_probabilistic_scores():
     y = np.array([True, False, False, True])
     assert "brier" not in evaluate(y, [5, 1, 2, 9], [1] * 4, [0] * 4, 0.5, False)
     assert "brier" in evaluate(y, [0.9, 0.1, 0.2, 0.8], [1] * 4, [0] * 4, 0.5, True)
+
+
+def test_code_version_from_git_in_a_checkout():
+    from fraudplatform.models.tracking import code_version
+
+    commit, dirty = code_version()
+    assert len(commit) == 40 and dirty in ("True", "False")
+
+
+def test_code_version_without_git_uses_the_commit_baked_into_the_image(monkeypatch):
+    from fraudplatform.models import tracking
+
+    monkeypatch.setattr(tracking, "_git", lambda *args: None)  # a Docker image: no git
+    monkeypatch.setenv("FRAUD_GIT_COMMIT", "a" * 40)
+    assert tracking.code_version() == ("a" * 40, "unknown")
+    monkeypatch.delenv("FRAUD_GIT_COMMIT")
+    assert tracking.code_version() == ("unknown", "unknown")  # never a guess, e.g. dirty=True

@@ -87,6 +87,7 @@ jobs:
           context: .
           target: app
           tags: fraudplatform:app
+          build-args: GIT_COMMIT=${{ github.sha }}
           load: true
           cache-from: type=gha,scope=app
           cache-to: type=gha,scope=app,mode=max
@@ -97,6 +98,7 @@ jobs:
           context: .
           target: train
           tags: fraudplatform:train
+          build-args: GIT_COMMIT=${{ github.sha }}
           load: true
           cache-from: type=gha,scope=train
           cache-to: type=gha,scope=train,mode=max

@@ -158,7 +158,11 @@ def models_compare() -> None:
 
 
 @models_app.command("tune")
-def models_tune() -> None:
+def models_tune(
+    n_jobs: Annotated[
+        int, typer.Option(help="Parallel logistic regression fits (memory, not results)")
+    ] = 4,
+) -> None:
     """Temporal CV, hyperparameter search and leakage experiments (Phase 7)."""
     from fraudplatform.config import load_feature_config, load_model_config, load_splits
     from fraudplatform.db import connect
@@ -168,7 +172,7 @@ def models_tune() -> None:
     out = PROJECT_ROOT / "data" / "processed" / "phase7"
     started = time.perf_counter()
     with connect() as conn:
-        run_phase7(conn, cfg, feature_cfg, splits, out)
+        run_phase7(conn, cfg, feature_cfg, splits, out, n_jobs=n_jobs)
     log.info("phase 7 finished in %.0fs; results in %s", time.perf_counter() - started, out)
 
 

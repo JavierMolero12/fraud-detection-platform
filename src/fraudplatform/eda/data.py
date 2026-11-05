@@ -80,6 +80,11 @@ def load_features(
 
     Booleans come back as 1.0 / 0.0 / NaN so that "unknown" (no device, no history) stays
     distinguishable from False. Scoring jobs pass with_label=False: they never read labels.
+
+    Rows come in a fixed order, the order the feature table is written in. Model results
+    depend on it: gradient boosting bins its inputs from a 200k-row subsample and shuffled
+    K-fold assigns rows by position. Without ORDER BY, the join with the leaky table ran in
+    parallel and returned a different order on every load (found in Phase 13).
     """
     leaky_cols = list(catalog.LEAKY_FEATURES) if include_leaky else []
     query = sql.SQL(
@@ -89,6 +94,7 @@ def load_features(
         {label_join}
         {leaky_join}
         WHERE f.ts >= {start} AND f.ts < {end}
+        ORDER BY f.ts, f.transaction_id
         """
     ).format(
         leaky=sql.SQL("").join(sql.SQL(", x.{}").format(sql.Identifier(c)) for c in leaky_cols),
