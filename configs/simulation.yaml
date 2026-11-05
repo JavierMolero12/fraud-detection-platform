@@ -4,7 +4,7 @@
 # The generator is frozen once modelling starts (Phase 6): any change after that must bump
 # `simulator_version` and be justified in docs/decisions.md.
 
-simulator_version: "1.0.0"
+simulator_version: "1.0.1"
 seed: 42
 
 scales:

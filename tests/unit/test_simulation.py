@@ -111,6 +111,14 @@ def test_no_transaction_before_card_issue_or_account_creation(small):
     assert (clean["ts_s"].to_numpy() >= created).all()
 
 
+def test_accounts_are_opened_on_or_after_the_18th_birthday(small):
+    """Calendar years, not 18 * 365.25 days (the v1.0.0 bug found by the DQ stage)."""
+    customers = small.raw["customers"].drop_duplicates("customer_id")
+    dob = pd.to_datetime(customers["date_of_birth"], utc=True)
+    created = pd.to_datetime(customers["account_creation_date"], utc=True)
+    assert (created >= dob + pd.DateOffset(years=18)).all()
+
+
 def test_device_first_seen_is_first_use(small):
     clean = small.clean_transactions
     first_use = clean[clean["device_id"] != ""].groupby("device_id")["ts_s"].min()

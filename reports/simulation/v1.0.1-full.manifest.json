@@ -1,0 +1,52 @@
+{
+  "simulator_version": "1.0.1",
+  "scale": "full",
+  "seed": 42,
+  "dataset_hash": "350d74bdc9880beb22803e1781c3a00d684fc92b63a1e2375f0ee9d6ce4f5f46",
+  "files": {
+    "raw/customers.csv": {
+      "rows": 30030,
+      "sha256": "6fb4b817067d12f3e0809c1d460da46ec39c4794e64d6bda767cf172df3da9a2"
+    },
+    "raw/cards.csv": {
+      "rows": 40164,
+      "sha256": "e194c4be0f1905b07b013a673be6e7e4448c1d42c09d7bee9e503e86aeef8ec7"
+    },
+    "raw/merchants.csv": {
+      "rows": 4000,
+      "sha256": "89cbdf002d1c9d37d9c0c3450a243d6a874463d7255bc1186adbf9ede6ad860f"
+    },
+    "raw/devices.csv": {
+      "rows": 55425,
+      "sha256": "f98052218bd83e26c59ea7e763ec0d5a73cfb8c27a0bb1dfe009bb4618dc54ab"
+    },
+    "raw/transactions.csv": {
+      "rows": 2866727,
+      "sha256": "78a32023a004f35173ed9a3cb0e5daec99bd09cc44bf35b1de21a8c9bd744c99"
+    },
+    "raw/fraud_labels.csv": {
+      "rows": 26071,
+      "sha256": "5e394c59a762f8107afb2740de11b3ee195d0f7351a8b3b26b6cf9ccae41e0a4"
+    },
+    "reference/currencies.csv": {
+      "rows": 8,
+      "sha256": "c14f48884edd3ffeeed8747a06064fa772300c9fabb080c23ed78ed4db45d761"
+    },
+    "reference/countries.csv": {
+      "rows": 14,
+      "sha256": "1a7bcbc00c5a8fb7075cdc69f503b2ab0440611fa4d655e2f673fd300f11ebc6"
+    },
+    "reference/fx_rates.csv": {
+      "rows": 5840,
+      "sha256": "4794aaf9875de75e59f581bb2eabf2a1d3899516c2158c74bf0c12e6b634be49"
+    },
+    "sim/ground_truth.csv": {
+      "rows": 2860434,
+      "sha256": "5ef2c0e7e868e574003448e20678318db1e2df684397130ef30eeb585d23e961"
+    },
+    "sim/dq_defects.csv": {
+      "rows": 21532,
+      "sha256": "a17fcc67013b25a15d8204aef50e9862192f7cd6b82a285b759a883b80e98e3e"
+    }
+  }
+}

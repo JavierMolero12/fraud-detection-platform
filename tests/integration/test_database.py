@@ -6,36 +6,13 @@ Run with:  docker compose up -d db  &&  pytest -m integration
 
 from __future__ import annotations
 
-from urllib.parse import urlsplit, urlunsplit
-
 import psycopg
 import pytest
 
-from fraudplatform.db import database_url, init_schema, load_dataset
+from fraudplatform.db import init_schema, load_dataset
 from fraudplatform.simulation.writer import write_dataset
 
 pytestmark = pytest.mark.integration
-
-
-def _with_db(url: str, name: str) -> str:
-    parts = urlsplit(url)
-    return urlunsplit(parts._replace(path=f"/{name}"))
-
-
-@pytest.fixture(scope="module")
-def conn():
-    base = database_url()
-    test_db = urlsplit(base).path.lstrip("/") + "_test"
-    try:
-        admin = psycopg.connect(_with_db(base, "postgres"), autocommit=True, connect_timeout=3)
-    except psycopg.OperationalError as exc:
-        pytest.skip(f"PostgreSQL not reachable: {exc}")
-    with admin:
-        admin.execute(f"DROP DATABASE IF EXISTS {test_db} WITH (FORCE)")
-        admin.execute(f"CREATE DATABASE {test_db}")
-    with psycopg.connect(_with_db(base, test_db)) as connection:
-        init_schema(connection)
-        yield connection
 
 
 @pytest.fixture(scope="module")
@@ -90,13 +67,19 @@ def test_valid_transaction_is_accepted(conn, core_rows):
     conn.execute(INSERT, VALID)
 
 
+def test_online_transaction_with_unknown_device_is_accepted(conn, core_rows):
+    """A placeholder device is repaired to NULL by the DQ stage; the payment is still real."""
+    row = list(VALID)
+    row[4] = None
+    conn.execute(INSERT, row)
+
+
 @pytest.mark.parametrize(
     ("change", "error"),
     [
         ({6: -5}, psycopg.errors.CheckViolation),  # amount must be > 0
         ({2: "K2"}, psycopg.errors.ForeignKeyViolation),  # card belongs to another customer
         ({3: "M404"}, psycopg.errors.ForeignKeyViolation),  # unknown merchant
-        ({4: None}, psycopg.errors.CheckViolation),  # e-commerce without device
         ({10: "chip_pin"}, psycopg.errors.CheckViolation),  # card present with a device
         ({7: "XXX"}, psycopg.errors.ForeignKeyViolation),  # unknown currency
     ],

@@ -4,7 +4,7 @@ End-to-end fraud risk scoring system built around the problems that make fraud d
 practice: temporal leakage, delayed labels, extreme class imbalance, cost-sensitive decisions,
 calibration and drift.
 
-> **Status:** work in progress. Phase 2 of 14 (synthetic data + PostgreSQL).
+> **Status:** work in progress. Phase 3 of 14 (data quality + SQL).
 > No model results exist yet; this README will only report numbers produced by real runs.
 
 ## Design
@@ -26,11 +26,21 @@ pip install -e ".[dev]"
 fraud simulate --scale small       # writes data/raw/v<version>-small/
 docker compose up -d db            # PostgreSQL 16 on localhost:5433
 fraud db init                      # creates schemas and tables
-fraud db load data/raw/v1.0.0-small
+fraud db load data/raw/v1.0.1-small
+fraud dq run                       # rules, quarantine, raw -> core, report
 ```
 
 Scales: `tiny` (tests), `small` (development, ~48k transactions), `full` (~2.9M transactions).
-Report of the full dataset: [`reports/simulation/v1.0.0-full.md`](reports/simulation/v1.0.0-full.md).
+Reports of the full dataset: [simulation](reports/simulation/v1.0.1-full.md), [data quality](reports/data_quality/dq_report.md).
+
+## Pipeline so far
+
+| Step | Command | Where |
+|---|---|---|
+| Synthetic data | `fraud simulate` | `src/fraudplatform/simulation/`, `configs/simulation.yaml` |
+| Load raw extract | `fraud db load` | `sql/schema/` |
+| Data quality (47 rules) | `fraud dq run` | `sql/data_quality/`, `dq.rules`, `dq.violations` |
+| Analytical SQL | `psql -f` | `sql/analysis/` |
 
 ## Tests
 
