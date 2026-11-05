@@ -52,3 +52,12 @@ def test_feature_config_loads():
     cfg = load_feature_config()
     assert cfg.night_hours[0] <= cfg.night_hours[1]
     assert set(cfg.sql_settings()) >= {"features.version", "features.micro_amount_eur"}
+
+
+def test_documented_feature_count_matches_the_catalog():
+    """Regression: the docs said 51 features for four phases while the catalog had 50."""
+    from fraudplatform.config import PROJECT_ROOT
+
+    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    assert f"{len(FEATURE_NAMES)} point-in-time features" in readme
+    assert f"Point-in-time features ({len(FEATURE_NAMES)})" in readme

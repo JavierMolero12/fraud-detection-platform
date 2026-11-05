@@ -10,7 +10,7 @@ of the same features would flatter the model.
 
 ## Changes
 
-- **51 features** in 7 groups (transaction, entity at ts, card velocity, customer behaviour,
+- **50 features** in 7 groups (transaction, entity at ts, card velocity, customer behaviour,
   device, geography, labels known at ts). Catalog with definition and rationale per feature:
   `src/fraudplatform/features/catalog.py` → `docs/feature_catalog.md`.
 - **SQL** (`sql/features/`):
@@ -35,7 +35,7 @@ of the same features would flatter the model.
 | Unit tests (incl. catalog checks and 3 new `binned_auc` tests) | 45 passed |
 | Integration tests | 37 passed |
 | – of which: hand-built scenario with exact expected values (ties, micro-charges, late label, impossible travel, shared device) | 9 |
-| – of which: **time-travel test** (delete the future, rebuild, compare the past) | 2: 0 / 51 clean features change; 5 / 5 leaky ones do |
+| – of which: **time-travel test** (delete the future, rebuild, compare the past) | 2: 0 / 50 clean features change; 5 / 5 leaky ones do |
 | Full build, 2,852,459 rows | 760 s |
 
 ## Findings (train period)

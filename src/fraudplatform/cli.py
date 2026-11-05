@@ -18,11 +18,13 @@ dq_app = typer.Typer(no_args_is_help=True, help="Data quality: rules, quarantine
 features_app = typer.Typer(no_args_is_help=True, help="Point-in-time feature engineering.")
 models_app = typer.Typer(no_args_is_help=True, help="Baselines, models and evaluation.")
 policy_app = typer.Typer(no_args_is_help=True, help="Calibration, costs and decision policy.")
+analyse_app = typer.Typer(no_args_is_help=True, help="Explanations and error analysis.")
 app.add_typer(db_app, name="db")
 app.add_typer(dq_app, name="dq")
 app.add_typer(features_app, name="features")
 app.add_typer(models_app, name="models")
 app.add_typer(policy_app, name="policy")
+app.add_typer(analyse_app, name="analyse")
 log = logging.getLogger("fraudplatform")
 
 
@@ -205,6 +207,26 @@ def policy_evaluate_test(
             load_splits(),
             PROJECT_ROOT / "data" / "processed" / "phase8",
             force=force,
+        )
+
+
+@analyse_app.command("validation")
+def analyse_validation(
+    quick: Annotated[bool, typer.Option(help="3 days only: smoke test of the whole job")] = False,
+) -> None:
+    """Explanations, error and segment analysis of the frozen bundle on validation (Phase 9)."""
+    from fraudplatform.analysis.run import run_phase9
+    from fraudplatform.config import load_model_config, load_splits
+    from fraudplatform.db import connect
+
+    with connect() as conn:
+        run_phase9(
+            conn,
+            load_model_config(),
+            load_splits(),
+            PROJECT_ROOT / "data" / "processed" / "phase8",
+            PROJECT_ROOT / "data" / "processed" / ("phase9_quick" if quick else "phase9"),
+            quick=quick,
         )
 
 

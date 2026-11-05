@@ -27,6 +27,7 @@ con una nueva entrada que la sustituya (no se reescribe la historia).
 | 020 | Modelo seleccionado por CV temporal; validación solo confirma | Aceptada (Fase 7) |
 | 021 | Política por coste esperado por transacción (P2) | Aceptada (Fase 8) |
 | 022 | El test se evalúa una sola vez y queda registrado en el repositorio | Aceptada (Fase 8) |
+| 023 | Explicaciones con SHAP PermutationExplainer y comprobación de aditividad | Aceptada (Fase 9) |
 
 ---
 
@@ -397,3 +398,26 @@ el comando se niega a ejecutarse otra vez salvo con `--force`, que debe justific
 
 **Consecuencias.** El historial de git demuestra el orden: primero la política congelada,
 después el test.
+
+---
+
+## 023 — Explicaciones con SHAP PermutationExplainer y comprobación de aditividad
+
+**Contexto.** `shap.TreeExplainer` es el método rápido y exacto para modelos de árboles. Con
+`HistGradientBoostingClassifier` y splits categóricos nativos devuelve valores erróneos sin
+avisar: en este modelo las contribuciones no suman la salida del modelo (error de hasta 4,6
+log-odds en todas las filas). Trata los splits categóricos como umbrales numéricos. Con un
+modelo sin splits categóricos el error es 1e-14.
+
+**Decisión.** Usar `shap.PermutationExplainer` (agnóstico al modelo, exacto por construcción,
+más lento) y comprobar en cada ejecución que base + contribuciones = log-odds del modelo
+(error máximo obtenido: 4,1e-14). La importancia global se mide además con permutación, por
+variable y por familia de variables.
+
+**Alternativas.** Reentrenar sin splits categóricos nativos para poder usar TreeExplainer
+(explicaría otro modelo, no el desplegado); usar solo importancia por permutación (no da
+explicaciones individuales).
+
+**Consecuencias.** Explicar 900 transacciones cuesta ~4 minutos. Para la API (Fase 10),
+explicar cada predicción en tiempo real sería caro: se valorará devolver solo las 3 variables
+principales o explicar bajo demanda.
