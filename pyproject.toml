@@ -15,12 +15,22 @@ dependencies = [
     "pyyaml>=6.0",
     "psycopg[binary]>=3.2",
     "typer>=0.12",
+    "scipy>=1.13",
+    "matplotlib>=3.9",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
+]
+# Notebooks are stored as jupytext percent scripts (notebooks/*.py, diff-friendly) and
+# executed into .ipynb files so GitHub renders their outputs.
+analysis = [
+    "jupyterlab>=4.2",
+    "jupytext>=1.16",
+    "nbclient>=0.10",
+    "ipykernel>=6.29",
 ]
 
 [project.scripts]
@@ -32,9 +42,13 @@ where = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+extend-exclude = ["*.ipynb"]  # generated from notebooks/*.py (jupytext), which are linted
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"notebooks/*.py" = ["B018"]  # a bare expression at the end of a cell is how notebooks display
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
