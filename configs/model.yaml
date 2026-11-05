@@ -34,3 +34,40 @@ models:
     max_iter: 400
     max_leaf_nodes: 31
     l2_regularization: 1.0
+
+# Phase 7: temporal cross-validation inside the training window (2024-10-01 .. 2025-07-01).
+# Expanding window: each fold trains on everything up to `gap_days` before its test month.
+# The gap keeps the end of an ongoing fraud campaign out of both sides of a split.
+cross_validation:
+  test_months: ["2025-03", "2025-04", "2025-05", "2025-06"]
+  gap_days: 14
+
+tuning:
+  scoring: average_precision     # = PR-AUC, the selection metric (decision 006)
+  hist_gradient_boosting:        # RandomizedSearchCV
+    n_iter: 16
+    space:
+      learning_rate: {loguniform: [0.02, 0.2]}
+      max_iter: [200, 400, 800]
+      max_leaf_nodes: [15, 31, 63, 127]
+      min_samples_leaf: [20, 50, 100, 200]
+      l2_regularization: {loguniform: [0.001, 10.0]}
+      max_features: [0.5, 0.8, 1.0]
+  logistic_regression:           # GridSearchCV: one parameter, a grid is enough
+    grid:
+      C: [0.01, 0.1, 1.0, 10.0, 100.0]
+  # Random forest is not tuned: in Phase 6 it tied with logistic regression and lost to
+  # gradient boosting, at 4x the training time.
+
+# Phase 7 outcome (decision 010 / 020). Chosen by temporal cross-validation, confirmed (not
+# chosen) on validation. Phase 8 calibrates this model and optimises the decision policy.
+selected_model:
+  family: hist_gradient_boosting
+  params:
+    learning_rate: 0.021
+    max_iter: 400
+    max_leaf_nodes: 31
+    min_samples_leaf: 50
+    l2_regularization: 0.68
+    max_features: 0.8
+  challenger: logistic_regression   # interpretable reference, C = 10 (C barely matters)

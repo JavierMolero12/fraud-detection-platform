@@ -229,11 +229,27 @@ class RuleParams(BaseModel):
     risky_categories: list[str]
 
 
+class CrossValidationParams(BaseModel):
+    test_months: list[str]  # "YYYY-MM", in increasing order
+    gap_days: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> CrossValidationParams:
+        if self.test_months != sorted(self.test_months) or len(set(self.test_months)) != len(
+            self.test_months
+        ):
+            raise ValueError("test_months must be unique and in increasing order")
+        return self
+
+
 class ModelConfig(BaseModel):
     random_state: int
     evaluation: EvaluationParams
     rules: RuleParams
     models: dict[str, dict]
+    cross_validation: CrossValidationParams | None = None
+    tuning: dict | None = None
+    selected_model: dict | None = None
 
 
 def load_model_config(path: Path | None = None) -> ModelConfig:

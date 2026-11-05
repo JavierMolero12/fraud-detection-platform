@@ -14,7 +14,7 @@ con una nueva entrada que la sustituya (no se reescribe la historia).
 | 007 | Política de decisión optimizada por coste dependiente del importe | Aceptada (Fase 1) |
 | 008 | Sin SMOTE por defecto | Aceptada (Fase 1) |
 | 009 | Stack mínimo | Aceptada (Fase 1) |
-| 010 | ¿Gradient Boosting como modelo final? | **Pendiente (Fase 7); Fase 6: +0,024 PR-AUC sobre regresión logística** |
+| 010 | ¿Gradient Boosting como modelo final? | Aceptada (Fase 7): sí, con regresión logística como alternativa interpretable |
 | 011 | Data Quality: rechazar, reparar o avisar | Aceptada (Fase 3) |
 | 012 | Clientes sin país: rechazo en cascada | Aceptada (Fase 3) |
 | 013 | Simulador v1.0.1: corrección de edad mínima | Aceptada (Fase 3) |
@@ -24,6 +24,7 @@ con una nueva entrada que la sustituya (no se reescribe la historia).
 | 017 | Features offline con window functions, online con lookups + test de paridad | Aceptada (Fase 5) |
 | 018 | Sin pesos de clase ni remuestreo | Aceptada (Fase 6) |
 | 019 | Modelos guardados con skops y lista explícita de tipos de confianza | Aceptada (Fase 6) |
+| 020 | Modelo seleccionado por CV temporal; validación solo confirma | Aceptada (Fase 7) |
 
 ---
 
@@ -168,8 +169,15 @@ centrales (leakage, coste, calibración, drift).
 
 ## 010 — ¿Gradient Boosting como modelo final?
 
-**Estado.** Pendiente. Se decidirá con los resultados de la Fase 7, no antes. Si LR o RF resultan
-equivalentes en coste, se preferirá el más simple y se documentará.
+**Estado.** Aceptada en la Fase 7, con evidencia:
+
+- Fase 6 (validación, comparación pareada por días): gradient boosting supera a regresión
+  logística en +0,024 de PR-AUC (IC +0,015 a +0,033) y a random forest en +0,026.
+- Fase 7 (CV temporal): 0,803 frente a 0,786 de la regresión logística ajustada.
+
+La ventaja es real pero modesta. Regla de la decisión original: si la diferencia en coste
+(Fase 8) resultara irrelevante, se preferiría la regresión logística por simplicidad. Se
+mantiene como alternativa interpretable.
 
 ---
 
@@ -330,3 +338,22 @@ predice exactamente lo mismo.
 modelo pasa a ser ejecutar código de un fichero.
 
 **Consecuencias.** Cualquier transformador nuevo obliga a ampliar la lista; el test lo detecta.
+
+---
+
+## 020 — Modelo seleccionado por CV temporal; validación solo confirma
+
+**Contexto.** La búsqueda aleatoria (16 configuraciones × 4 folds temporales) encuentra un
+gradient boosting con 0,803 de PR-AUC en CV frente a 0,797 de la configuración por defecto.
+En validación la diferencia es +0,002 (IC pareado −0,004 a +0,008): no significativa.
+
+**Decisión.** Seleccionar la configuración con mejor CV temporal (`selected_model` en
+`configs/model.yaml`) sin elegir nada mirando validación. Validación no la contradice y no
+cuesta más.
+
+**Alternativas.** Volver a los valores por defecto (igual de defendible: la mejora está dentro
+del ruido); elegir por validación (sería ajustar hiperparámetros con validación y convertirla
+en otro conjunto de entrenamiento).
+
+**Consecuencias.** La variación entre meses (0,759 a 0,825 en CV) es mayor que cualquier
+ganancia de tuning: la incertidumbre por mes debe aparecer en los informes y en el monitoring.

@@ -149,5 +149,20 @@ def models_compare() -> None:
     typer.echo(report)
 
 
+@models_app.command("tune")
+def models_tune() -> None:
+    """Temporal CV, hyperparameter search and leakage experiments (Phase 7)."""
+    from fraudplatform.config import load_feature_config, load_model_config, load_splits
+    from fraudplatform.db import connect
+    from fraudplatform.models.tuning import run_phase7
+
+    cfg, feature_cfg, splits = load_model_config(), load_feature_config(), load_splits()
+    out = PROJECT_ROOT / "data" / "processed" / "phase7"
+    started = time.perf_counter()
+    with connect() as conn:
+        run_phase7(conn, cfg, feature_cfg, splits, out)
+    log.info("phase 7 finished in %.0fs; results in %s", time.perf_counter() - started, out)
+
+
 if __name__ == "__main__":
     app()
