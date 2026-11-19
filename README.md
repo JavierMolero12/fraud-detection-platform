@@ -20,7 +20,7 @@ from a recorded run**, including the ones that did not go as expected.
 
 | | |
 |---|---|
-| Ranking, validation → the single test evaluation | PR-AUC 0.792 → **0.752** (base rate 0.73%; seven expert rules: 0.256) |
+| Ranking, validation → the single test evaluation | PR-AUC 0.792 → **0.752** (base rate 0.73%; seven expert rules on validation: 0.256) |
 | Cost of the deployed policy on test | **€64,098** vs €946,956 approving everything (−93.2%) and €482,886 for the rules |
 | Fraud EUR stopped on test | **95.5%**; real false decline rate 0.036% once label noise is removed |
 | Leakage, measured | a model with leaky features scores 0.852 offline and **0.401** in production |
@@ -29,6 +29,16 @@ from a recorded run**, including the ones that did not go as expected.
 
 The whole story, with its limitations: **[final report](reports/final_report.md)** ·
 [model card](reports/model_card.md) · [monitoring report](reports/monitoring/monitoring_report.html).
+
+## Stack
+
+| Area | Tools |
+|---|---|
+| Language | Python 3.11+ and SQL |
+| Data | PostgreSQL 16 (layered schemas), SQL data quality rules, window functions, point-in-time features, pandas, NumPy |
+| Machine learning | scikit-learn (logistic regression, HistGradientBoosting), probability calibration, MLflow, SHAP |
+| Backend | FastAPI, Uvicorn, Pydantic, psycopg 3, a `fraud` command-line tool (Typer) |
+| DevOps | Docker, Docker Compose, GitHub Actions, pytest, ruff |
 
 ## How it works
 
@@ -152,23 +162,24 @@ executed into `.ipynb` so GitHub shows their outputs.
 
 Phase by phase, one branch and one pull request each; every PR description is in
 [`docs/pull_requests/`](docs/pull_requests). Phase 1 was the [design](docs/phase1_design.md).
+The description files are numbered by phase; on GitHub the same pull requests are #1 to #14.
 
-| Phase | Pull request description |
-|---|---|
-| 2 · simulator and database | [PR-02](docs/pull_requests/PR-02-simulator-and-db.md) |
-| 3 · data quality and SQL | [PR-03](docs/pull_requests/PR-03-data-quality-sql.md) |
-| 4 · EDA and statistics | [PR-04](docs/pull_requests/PR-04-eda.md) |
-| 5 · temporal features | [PR-05](docs/pull_requests/PR-05-temporal-features.md) |
-| 6 · baselines and models | [PR-06](docs/pull_requests/PR-06-modeling.md) |
-| 7 · temporal validation and tuning | [PR-07](docs/pull_requests/PR-07-temporal-validation.md) |
-| 8 · cost, threshold, calibration | [PR-08](docs/pull_requests/PR-08-cost-threshold-calibration.md) |
-| 9 · error analysis | [PR-09](docs/pull_requests/PR-09-error-analysis.md) |
-| 10 · API and batch scoring | [PR-10](docs/pull_requests/PR-10-api-and-batch.md) |
-| 11 · Docker and CI | [PR-11](docs/pull_requests/PR-11-docker-ci.md) |
-| 12 · monitoring | [PR-12](docs/pull_requests/PR-12-monitoring.md) |
-| 13 · documentation | [PR-13](docs/pull_requests/PR-13-documentation.md) |
-| 14 · tech-lead review | [PR-14](docs/pull_requests/PR-14-tech-lead-review.md) |
-| After 14 · payment simulator | [PR-15](docs/pull_requests/PR-15-payment-simulator.md) |
+| Phase | Pull request description | On GitHub |
+|---|---|---|
+| 2 · simulator and database | [PR-02](docs/pull_requests/PR-02-simulator-and-db.md) | [#1](https://github.com/JavierMolero12/fraud-detection-platform/pull/1) |
+| 3 · data quality and SQL | [PR-03](docs/pull_requests/PR-03-data-quality-sql.md) | [#2](https://github.com/JavierMolero12/fraud-detection-platform/pull/2) |
+| 4 · EDA and statistics | [PR-04](docs/pull_requests/PR-04-eda.md) | [#3](https://github.com/JavierMolero12/fraud-detection-platform/pull/3) |
+| 5 · temporal features | [PR-05](docs/pull_requests/PR-05-temporal-features.md) | [#4](https://github.com/JavierMolero12/fraud-detection-platform/pull/4) |
+| 6 · baselines and models | [PR-06](docs/pull_requests/PR-06-modeling.md) | [#5](https://github.com/JavierMolero12/fraud-detection-platform/pull/5) |
+| 7 · temporal validation and tuning | [PR-07](docs/pull_requests/PR-07-temporal-validation.md) | [#6](https://github.com/JavierMolero12/fraud-detection-platform/pull/6) |
+| 8 · cost, threshold, calibration | [PR-08](docs/pull_requests/PR-08-cost-threshold-calibration.md) | [#7](https://github.com/JavierMolero12/fraud-detection-platform/pull/7) |
+| 9 · error analysis | [PR-09](docs/pull_requests/PR-09-error-analysis.md) | [#8](https://github.com/JavierMolero12/fraud-detection-platform/pull/8) |
+| 10 · API and batch scoring | [PR-10](docs/pull_requests/PR-10-api-and-batch.md) | [#9](https://github.com/JavierMolero12/fraud-detection-platform/pull/9) |
+| 11 · Docker and CI | [PR-11](docs/pull_requests/PR-11-docker-ci.md) | [#10](https://github.com/JavierMolero12/fraud-detection-platform/pull/10) |
+| 12 · monitoring | [PR-12](docs/pull_requests/PR-12-monitoring.md) | [#11](https://github.com/JavierMolero12/fraud-detection-platform/pull/11) |
+| 13 · documentation | [PR-13](docs/pull_requests/PR-13-documentation.md) | [#12](https://github.com/JavierMolero12/fraud-detection-platform/pull/12) |
+| 14 · tech-lead review | [PR-14](docs/pull_requests/PR-14-tech-lead-review.md) | [#13](https://github.com/JavierMolero12/fraud-detection-platform/pull/13) |
+| After 14 · payment simulator | [PR-15](docs/pull_requests/PR-15-payment-simulator.md) | [#14](https://github.com/JavierMolero12/fraud-detection-platform/pull/14) |
 
 ## Tests
 
@@ -194,6 +205,10 @@ end.
 The full list is in the [final report](reports/final_report.md#13-limitations). A
 [tech-lead review](docs/tech_lead_review.md) scores each area and ranks what to fix before real
 traffic.
+
+## Author
+
+Javier Molero Moreno · [GitHub](https://github.com/JavierMolero12)
 
 ## License
 
